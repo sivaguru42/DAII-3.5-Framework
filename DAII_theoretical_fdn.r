@@ -1,5 +1,5 @@
 # ============================================================================
-# DAII 3.5 - Digital Acceleration & Innovation Index
+# DAII 3.5 - DUMAC AI Investment Intelligence
 # ============================================================================
 # 
 # THEORETICAL FRAMEWORK:
