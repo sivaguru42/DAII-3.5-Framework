@@ -1,5 +1,5 @@
 # ============================================================
-# SCRIPT 1: SETUP & TEST DATASET CREATION - ULTIMATE FIX
+# SETUP & TEST DATASET CREATION
 # ============================================================
 # Purpose: Download and reassemble N200 dataset, create N=50 test dataset
 # Run this script FIRST
@@ -371,5 +371,6 @@ cat(sprintf("   N200 Full Dataset:      %d rows, %d columns, %d companies\n",
             nrow(n200_data), ncol(n200_data), length(unique(n200_data$Ticker))))
 cat(sprintf("   N50 Test Dataset:       %d rows, %d columns, %d companies\n", 
             nrow(n50_test_data), ncol(n50_test_data), length(unique(n50_test_data$Ticker))))
+
 
 cat("\n✅ READY FOR MODULE 1 DATA INGESTION!\n")
