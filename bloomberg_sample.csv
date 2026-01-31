@@ -1,0 +1,11 @@
+"Ticker","Tot Ret Idx Gross","Last Price","Volume","Mkt Cap","R&D Exp","Patents / Trademarks / Copy Rgt","Number of Employees","GM","Rev - 1 Yr Gr","Volatil 360D","BEst Analyst Rtg","GICS Ind Grp Name","Tot # Hldg in Port","Top 10 as of Dt","BEst Target Px","Rec Consensus","Earnings Conference Call Date","Tot Analyst Rec","News Sent","Percent Change in Institutional Holdings","Shrt Int"
+"AAPL US",215.03,175.68,8705240,2.8e+12,15002,8456,164000,58.3,17.6,23.5,3.7,"Technology Hardware",407,"#N/A Field Not Applicable",195,3.7,"2025-01-30",34,-0.486,1.6,7643693
+"MSFT US",415.32,331.2,6891674,2.2e+12,17986,9234,221000,38.3,13.9,38.4,4.5,"Software",377,"#N/A Field Not Applicable",350,4.3,"2025-01-28",40,-0.261,-2.6,9796314
+"GOOGL US",263.59,142.45,5691993,1.7e+12,22052,NA,156000,48.4,16.3,29.6,4,"Software",188,"#N/A Field Not Applicable",160,4.9,"2025-01-29",56,0.596,-6.7,12092996
+"AMZN US",453.21,158.9,1402857,1.5e+12,33867,6543,1335000,44.6,-5,42.6,4.5,"Consumer Discretionary",124,"#N/A Field Not Applicable",180,4.4,"2025-02-01",27,-0.199,1.7,5534031
+"TSLA US",476.19,245.67,9972029,8e+11,1590,2345,127855,63.5,9.3,18.6,4,"Automobiles",390,"#N/A Field Not Applicable",275,4.1,"2025-01-31",29,NA,7.2,2556255
+"JPM US",118.22,172.34,6077584,4.5e+11,1005,1234,250000,50.7,1.6,30.2,3.8,"Banks",467,"#N/A Field Not Applicable",185,4.5,"2025-02-02",53,-0.4,-3.5,2351222
+"JNJ US",311.24,155.67,3766694,3.8e+11,1876,NA,135000,63.4,6.4,49.5,4.7,"Pharmaceuticals",385,"#N/A Field Not Applicable",170,4,"2025-02-03",29,-0.181,3.3,5884387
+"V US",456.97,267.89,8617355,5.2e+11,701,876,26500,63.4,13.4,46.3,3.6,"Financial Services",495,"#N/A Field Not Applicable",290,4,"2025-01-27",41,0.452,-3.5,6391320
+"PG US",320.57,145.67,1402312,3.4e+11,NA,1456,107000,62.8,5.6,46,4.2,"Household Products",258,"#N/A Field Not Applicable",160,3.8,"2025-01-26",31,0.602,5.1,3521909
+"HD US",282.65,345.67,2498010,3.2e+11,454,789,475000,50.4,-1.7,21.1,4.3,"Retail",220,"#N/A Field Not Applicable",375,4.1,"2025-01-25",39,0.147,0.6,14035233
