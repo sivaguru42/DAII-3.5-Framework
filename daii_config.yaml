@@ -1,0 +1,217 @@
+# DAII 3.5 Configuration File
+# Version: 3.5.0
+# Last Updated: 2026-01-20
+
+# ==============================
+# DATA PATHS & INPUTS
+# ==============================
+data:
+  input_dir: "data/raw/"
+  output_dir: "outputs/"
+  processed_dir: "data/processed/"
+  external_data_dir: "data/external/"
+  
+  # Required input files
+  required_files:
+    company_data: "company_data.csv"
+    portfolio_holdings: "portfolio_holdings.csv"
+    gics_sectors: "gics_sectors.csv"
+    analyst_coverage: "analyst_coverage.csv"
+    patent_data: "patent_data.csv"
+
+# ==============================
+# SCORING PARAMETERS
+# ==============================
+scoring:
+  # Component weights (must sum to 1.0)
+  weights:
+    r_and_d: 0.30
+    analyst_coverage: 0.20
+    patent_activity: 0.25
+    news_sentiment: 0.10
+    growth_metrics: 0.15
+  
+  # Normalization settings
+  normalization:
+    method: "minmax"  # Options: minmax, zscore, robust
+    range: [0, 100]
+    clip_outliers: true
+    winsorize_threshold: 0.05
+  
+  # Log transformations
+  log_transform:
+    enabled: true
+    variables:
+      - r_and_d_expenditure
+      - patent_count
+      - market_cap
+    base: 10
+    offset: 1  # Add 1 to avoid log(0)
+
+# ==============================
+# IMPUTATION SETTINGS
+# ==============================
+imputation:
+  method: "industry_median"  # Options: mean, median, industry_mean, industry_median
+  industry_classification: "GICS"  # Options: GICS, NAICS, SIC
+  missing_threshold: 0.3  # Maximum % missing allowed before flagging
+  
+  # Industry-aware imputation
+  industry_settings:
+    use_sector: true
+    use_sub_industry: false
+    min_companies_per_group: 5
+
+# ==============================
+# VALIDATION THRESHOLDS
+# ==============================
+validation:
+  # Statistical validation
+  statistical:
+    correlation_threshold: 0.7
+    variance_threshold: 0.1
+    skewness_threshold: 3.0
+    kurtosis_threshold: 10.0
+  
+  # Business validation
+  business:
+    known_innovators:
+      - "AAPL"
+      - "MSFT"
+      - "GOOGL"
+      - "AMZN"
+      - "NVDA"
+      - "TSLA"
+      - "META"
+    
+    expected_min_score: 20
+    expected_max_score: 85
+  
+  # Process validation
+  process:
+    max_imputation_percentage: 0.25
+    min_data_completeness: 0.7
+
+# ==============================
+# PORTFOLIO SETTINGS
+# ==============================
+portfolio:
+  aggregation:
+    method: "market_value_weighted"  # Options: equal_weighted, market_value_weighted
+    currency: "USD"
+    
+  concentration_metrics:
+    calculate_hhi: true
+    calculate_gini: true
+    calculate_herfindahl: true
+    
+  benchmarking:
+    benchmark_index: "SP500"  # Options: SP500, NASDAQ, RUSSELL3000
+    peer_group: "Large Cap Technology"
+
+# ==============================
+# OUTPUT SETTINGS
+# ==============================
+output:
+  formats:
+    - csv
+    - excel
+    - html
+    - rds
+    
+  excel:
+    template: "templates/daii_output_template.xlsx"
+    sheet_names:
+      summary: "Executive Summary"
+      scores: "Company Scores"
+      portfolio: "Portfolio Analysis"
+      validation: "Validation Metrics"
+      components: "Component Breakdown"
+    
+  reports:
+    generate_executive_summary: true
+    generate_detailed_report: true
+    language: "English"
+    currency_symbol: "$"
+    
+  visualization:
+    theme: "daii_corporate"
+    color_palette: "viridis"
+    font_family: "Arial"
+    plot_width: 12
+    plot_height: 8
+    dpi: 300
+
+# ==============================
+# SYSTEM SETTINGS
+# ==============================
+system:
+  # Parallel processing
+  parallel:
+    enabled: true
+    cores: 4
+    type: "multisession"  # Options: multisession, multicore
+  
+  # Memory management
+  memory:
+    max_memory_gb: 8
+    chunk_size: 1000  # Number of companies per chunk
+    
+  # Caching
+  cache:
+    enabled: true
+    cache_dir: "cache/"
+    expire_days: 7
+    
+  # Logging
+  logging:
+    level: "INFO"  # Options: DEBUG, INFO, WARN, ERROR
+    log_file: "admin/logs/daii_log.txt"
+    max_file_size_mb: 10
+    keep_logs_days: 30
+
+# ==============================
+# DASHBOARD SETTINGS
+# ==============================
+dashboard:
+  theme: "corporate"
+  colors:
+    primary: "#1E3A8A"
+    secondary: "#3B82F6"
+    success: "#10B981"
+    warning: "#F59E0B"
+    danger: "#EF4444"
+    
+  refresh_interval: 300  # Seconds
+  
+  features:
+    interactive_filtering: true
+    drill_down: true
+    export_functionality: true
+    real_time_updates: false
+    
+  layout:
+    default_view: "executive"
+    mobile_optimized: true
+    max_companies_display: 200
+
+# ==============================
+# ML INTEGRATION (FUTURE)
+# ==============================
+ml:
+  enabled: false
+  models:
+    - name: "innovation_predictor"
+      type: "xgboost"
+      features: ["r_and_d_score", "patent_score", "analyst_score"]
+      target: "future_returns"
+      
+  training:
+    test_size: 0.2
+    validation_size: 0.1
+    cross_validation_folds: 5
+    
+  hyperparameters:
+    n_estimators: 100
+    learning_rate: 0.1
+    max_depth: 6
