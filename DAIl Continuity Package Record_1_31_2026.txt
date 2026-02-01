@@ -1,0 +1,269 @@
+2/1/2026
+DAII 3.5 Continuity Package (Modules 1-5):
+Here is a concise continuity package summarizing the integration to date and next steps:
+
+TWorking directory set up:
+
+C:\Users\sganesan\OneDrive - dumac.duke.edu\DAII\
+├── data\
+│   └── raw\                    # For all data files
+└── R\
+    └── scripts\                # For all R scripts
+
+Links to important files in my Github Public Respository:
+
+N=50 hybrid (real + synthetic data) sample dataset-
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/DAII_3_5_N50_Test_Dataset.csv
+
+Test samples-
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/dumac_sample.csv
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/dumac_extended_sample.csv
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/bloomberg_sample.csv
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/verify_samples.R
+
+Test script-
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/DAII%203._%20PIPELINE_TEST_SCRIPT_N%3D50_DATASET.R (Diagnostic Tool)
+
+
+DAII 3.5 PRODUCTION PIPELINE WITH FIELD MAPPING SYSTEM-
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/DAII%203.5%20Integration_Production_Pipeline_AddedFieldmapping_1_29_2026.R
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/DAII_3_5_Production_Pipeline.R (Core Functions)
+
+Configuration Files-
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/daii_config.yaml
+https://raw.githubusercontent.com/sivaguru42/DAII-3.5-Framework/refs/heads/main/test_production_config.yml
+
+Current Integration Status:
+Inclusion of FIELD MAPPING SYSTEM
+
+Modules 1-3: Successfully integrated into a unified pipeline (Data → Imputation → Scoring). Tested with the N=50 dataset. The key fix was implementing a robust, rank-based quartile classification to handle duplicate score values.
+
+Module 4: Reviewed and adjusted for integration. The primary task is mapping the component score column names from Module 3 (rd_intensity_score) to those expected by Module 4 (R_D_Score). A wrapper function has been prepared.
+
+Module 5: Now received. Its main function, integrate_with_portfolio(), expects the output from Module 4 and the original holdings data to map scores and calculate portfolio-level metrics.
+
+Critical Adjustments Needed:
+
+Column Name Bridge between Modules 3 & 4: Before running Module 4, ensure the scores_data dataframe has the correctly named columns or use the provided wrapper function that handles the renaming.
+
+Preparation for Module 5: Module 5 needs both the scored company data (daii_scores) and the original holdings_data to perform the merge.
+
+Immediate Next Step Script:
+
+r
+# INTEGRATION OF MODULES 4 & 5
+# Assumptions:
+# - 'scoring_result' exists from running Modules 1-3.
+# - 'full_data' is the original N=50 holdings dataset.
+
+# 1. Prepare data for Module 4: Ensure column names match.
+scores_for_aggregation <- scoring_result$scores_data
+# If needed, rename columns to match Module 4 expectations:
+# names(scores_for_aggregation) <- gsub("intensity_score", "D_Score", names(scores_for_aggregation))
+# ... (apply other renames)
+
+# 2. Run Module 4: Aggregation Framework.
+aggregation_result <- calculate_daii_scores(
+  scores_data = scores_for_aggregation,
+  ticker_col = "Ticker",
+  industry_col = "GICS.Ind.Grp.Name"
+)
+
+# 3. Run Module 5: Portfolio Integration.
+portfolio_result <- integrate_with_portfolio(
+  holdings_data = full_data,           # Original holdings
+  daii_scores = aggregation_result$daii_data, # Output from Module 4
+  ticker_col = "Ticker",
+  weight_col = "fund_weight",          # From your dataset
+  fund_col = "fund_name"               # From your dataset
+)
+
+# 4. Inspect key results.
+print(portfolio_result$portfolio_metrics$overall)
+head(portfolio_result$fund_analysis)
+
+Recommended Forward Path:
+
+Finalize Integration: Run the script above to connect Modules 4 & 5, creating the first complete, start-to-finish DAII 3.5 pipeline.
+
+Develop Configuration System: Once the core logic is solid, we should design and implement the field_mapping system discussed. This will make the framework truly resilient to changing data sources.
+
+Proceed to Validation: The next logical step is integrating Module 6 (VALIDATION SYSTEM) to test the pipeline's output quality.
+
+To move forward efficiently, shall we first test the integration of Modules 4 and 5 with the current N=50 dataset?
+
+Addendum (FYI):
+
+The Smart Mapping Function with User Overrides -
+# ============================================================================
+# DAII FIELD MAPPING & PREPARATION ENGINE
+# ============================================================================
+
+#' @title Prepare and Standardize DAII Input Data
+#' @description Maps raw data columns to standardized DAII field names using a
+#'   config file and optional user overrides. This is the main entry point for data.
+#' @param raw_data A dataframe of raw input data (e.g., from Bloomberg CSV).
+#' @param config_path Path to the YAML config file. If NULL, uses a default internal list.
+#' @param user_col_map A named list of user overrides. Names are DAII logical fields
+#'   (e.g., 'rd_expense'), values are the exact column name in `raw_data`.
+#' @param auto_map Logical. If TRUE, attempts to find unmapped columns using fuzzy matching.
+#' @return A cleaned dataframe with standardized column names ready for the DAII pipeline.
+#' @examples
+#'   my_data <- read.csv("portfolio_data.csv")
+#'   # Simple override for one column
+#'   cleaned <- prepare_daii_data(my_data,
+#'                user_col_map = list(rd_expense = "Bloomberg_RD_Field"))
+prepare_daii_data <- function(raw_data,
+                              config_path = NULL,
+                              user_col_map = list(),
+                              auto_map = TRUE) {
+
+  cat("🧹 PREPARING DAII INPUT DATA\n")
+  cat(paste(rep("=", 60), collapse = ""), "\n")
+
+  # 1. LOAD CONFIGURATION
+  config <- load_daii_config(config_path)
+  required_fields <- names(config$daii_fields)
+
+  # 2. INITIALIZE MAPPING LOGIC
+  final_map <- list()      # What we will use for renaming
+  source_cols <- list()    # Where we found each column
+  missing_fields <- c()    # Fields we cannot find
+
+  cat("\n🔍 MAPPING LOGICAL FIELDS TO SOURCE COLUMNS:\n")
+
+  # 3. RESOLVE EACH REQUIRED FIELD (with priority)
+  for (field in required_fields) {
+    config_entry <- config$daii_fields[[field]]
+    found_col <- NA
+
+    # PRIORITY 1: User-Specified Override (highest)
+    if (!is.null(user_col_map[[field]])) {
+      user_spec <- user_col_map[[field]]
+      if (user_spec %in% names(raw_data)) {
+        found_col <- user_spec
+        source_cols[[field]] <- paste0("user override: '", found_col, "'")
+        cat(sprintf("   ✓ %-20s -> %s\n", field, source_cols[[field]]))
+      } else {
+        warning(sprintf("User override for '%s' specified column '%s' not found in data.", field, user_spec))
+      }
+    }
+
+    # PRIORITY 2: Expected Column Name from Config
+    if (is.na(found_col) && config_entry$expected %in% names(raw_data)) {
+      found_col <- config_entry$expected
+      source_cols[[field]] <- paste0("expected: '", found_col, "'")
+      cat(sprintf("   ✓ %-20s -> %s\n", field, source_cols[[field]]))
+    }
+
+    # PRIORITY 3: Alternative Column Names from Config
+    if (is.na(found_col) && length(config_entry$alternatives) > 0) {
+      for (alt in config_entry$alternatives) {
+        if (alt %in% names(raw_data)) {
+          found_col <- alt
+          source_cols[[field]] <- paste0("alternative: '", found_col, "'")
+          cat(sprintf("   ✓ %-20s -> %s\n", field, source_cols[[field]]))
+          break
+        }
+      }
+    }
+
+    # PRIORITY 4: Fuzzy/Auto Matching (if enabled)
+    if (is.na(found_col) && auto_map) {
+      # Simple case-insensitive grep for the field name or its parts
+      pattern <- gsub("_", ".", field) # 'rd_expense' becomes 'rd.expense'
+      matches <- grep(pattern, names(raw_data), ignore.case = TRUE, value = TRUE)
+      if (length(matches) == 1) { # Only accept if unambiguous
+        found_col <- matches[1]
+        source_cols[[field]] <- paste0("auto-matched: '", found_col, "'")
+        cat(sprintf("   ~ %-20s -> %s\n", field, source_cols[[field]]))
+      }
+    }
+
+    # STORE RESULT OR FLAG AS MISSING
+    if (!is.na(found_col)) {
+      final_map[[found_col]] <- field  # Map 'R.D.Exp' to 'rd_expense'
+    } else {
+      missing_fields <- c(missing_fields, field)
+      cat(sprintf("   ✗ %-20s -> NOT FOUND\n", field))
+    }
+  }
+
+  # 4. CREATE STANDARDIZED DATAFRAME
+  cat("\n📦 CREATING STANDARDIZED DATAFRAME\n")
+
+  # Select and rename the columns we found
+  cols_to_keep <- names(final_map)
+  if (length(cols_to_keep) == 0) {
+    stop("CRITICAL: No DAII fields could be mapped. Check your data and configuration.")
+  }
+
+  clean_data <- raw_data[, cols_to_keep, drop = FALSE]
+  names(clean_data) <- final_map[cols_to_keep]
+
+  # 5. REPORT & RETURN
+  cat(sprintf("   Selected %d of %d required fields.\n",
+              length(cols_to_keep), length(required_fields)))
+
+  if (length(missing_fields) > 0) {
+    cat("\n⚠️  MISSING FIELDS (may cause errors in later modules):\n")
+    cat(paste("   -", missing_fields, collapse = "\n"))
+  }
+
+  # Add mapping metadata as an attribute (for debugging/auditing)
+  attr(clean_data, "daii_field_mapping") <- source_cols
+  attr(clean_data, "missing_fields") <- missing_fields
+
+  cat("\n✅ DATA PREPARATION COMPLETE\n")
+  return(clean_data)
+}
+
+# ============================================================================
+# SUPPORTING FUNCTIONS
+# ============================================================================
+
+load_daii_config <- function(config_path = NULL) {
+  #' Load DAII field mapping configuration from YAML or use default
+  if (!is.null(config_path) && file.exists(config_path)) {
+    if (!require("yaml", quietly = TRUE)) install.packages("yaml")
+    library(yaml)
+    config <- yaml::read_yaml(config_path)
+  } else {
+    # Use internal default config (the list structure matching the YAML above)
+    config <- list(
+      daii_fields = list(
+        ticker = list(expected = "Ticker", alternatives = c("Symbol", "Securities")),
+        rd_expense = list(expected = "R.D.Exp", alternatives = c("RD_Expense")),
+        # ... include all fields from the YAML example above
+      )
+    )
+    cat("   Using default configuration.\n")
+  }
+  return(config)
+}
+
+# ============================================================================
+# EXAMPLE USAGE
+# ============================================================================
+
+# Example 1: Simple use with your N=50 data (should map automatically)
+# clean_n50 <- prepare_daii_data(full_data)
+
+# Example 2: With user overrides for a Bloomberg file
+# bloomberg_data <- read.csv("bloomberg_extract_2025.csv")
+#
+# user_overrides <- list(
+#   rd_expense = "X(p) Research & Development",  # Odd Bloomberg field name
+#   market_cap = "CUR_MKT_CAP",
+#   analyst_rating = "BEST_ANALYST_RATING"
+# )
+#
+# clean_data <- prepare_daii_data(
+#   raw_data = bloomberg_data,
+#   user_col_map = user_overrides,
+#   config_path = "config/daii_fields.yaml"  # Your team's maintained config
+# )
+#
+# # Now run the DAII pipeline on the CLEAN, STANDARDIZED data:
+# validation_result <- load_and_validate_data(clean_data, ticker_col = "ticker")
+# # ... proceed with Modules 1-5
