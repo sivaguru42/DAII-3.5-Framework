@@ -1,0 +1,115 @@
+# ============================================================================
+# DAII 3.5 PRODUCTION FIELD MAPPING CONFIGURATION
+# ============================================================================
+# For DUMAC Investment Intelligence Framework
+# Version: 1.0.0
+# Created: 2025
+# ============================================================================
+
+# DAII Logical Field Definitions
+# Priority: User Override → Expected → Alternatives → Auto-match
+daii_fields:
+
+  # COMPANY IDENTIFIERS
+  ticker:
+    expected: "Ticker"
+    alternatives: ["Symbol", "ID_BB_GLOBAL", "Matched_Ticker", "Instr/BB_Code", "ISIN", "SEDOL"]
+  
+  # BLOOMBERG DATA FIELDS (Company-level metrics)
+  rd_expense:
+    expected: "R&D Exp"
+    alternatives: ["R.D.Exp", "RD_Expense", "Research_Development", "X(p) Research & Development"]
+  
+  market_cap:
+    expected: "Mkt Cap"
+    alternatives: ["Mkt.Cap", "MarketCap", "CUR_MKT_CAP", "Market Capitalization"]
+  
+  analyst_rating:
+    expected: "BEst Analyst Rtg"
+    alternatives: ["BEst.Analyst.Rtg", "ANR", "BEST_ANALYST_RATING", "Analyst Consensus", "Rec Consensus"]
+  
+  patent_count:
+    expected: "Patents / Trademarks / Copy Rgt"
+    alternatives: ["Patents...Trademarks...Copy.Rgt", "Patent_Count", "NO_PATENTS", "Intellectual Property"]
+  
+  news_sentiment:
+    expected: "News Sent"
+    alternatives: ["News.Sent", "NEWS_SENTIMENT", "News Sentiment Score", "Sentiment"]
+  
+  revenue_growth:
+    expected: "Rev - 1 Yr Gr"
+    alternatives: ["Rev...1.Yr.Gr", "Sales_Growth", "RTG_SALES_GROWTH", "Revenue Growth 1Y"]
+  
+  industry:
+    expected: "GICS Ind Grp Name"
+    alternatives: ["GICS.Ind.Grp.Name", "Instr/BB_IndustrySector", "Industry", "Sector", "GICS_INDUSTRY_GROUP_NAME"]
+  
+  # DUMAC PORTFOLIO DATA FIELDS (Fund-level metrics)
+  fund_name:
+    expected: "Fund Name"
+    alternatives: ["fund_name", "Fund/Fund Legal Name (2)", "Fund_Fund_Legal_Name_2", "fund_name", "Manager"]
+  
+  fund_weight:
+    expected: "Long (%LTP)"
+    alternatives: ["fund_weight", "Weight", "FUND_WEIGHT", "Net (%LTP)", "Long (%Manager)", 
+                  "Risk/Long Exposure", "Positions/Base/Total NAV", "dumac_allocation", "fund_weight_raw"]
+  
+  # ADDITIONAL DUMAC FIELDS (Optional but useful)
+  position_value:
+    expected: "position_value"
+    alternatives: ["Positions/Base/Notional Market Value (Base)", "position_value", "MV"]
+  
+  shares_held:
+    expected: "shares_held"
+    alternatives: ["Positions/End Quantity", "shares_held", "Quantity"]
+  
+  as_of_date:
+    expected: "as_of_date"
+    alternatives: ["as_of_date", "date", "Date", "Position Date"]
+  
+  fund_id:
+    expected: "fund_id"
+    alternatives: ["Fund/Client Code", "fund_id", "DW_ID"]
+
+# ============================================================================
+# DATA SOURCE PROFILES (Optional - for documentation)
+# ============================================================================
+data_sources:
+  bloomberg_terminal:
+    description: "Bloomberg Terminal Data Feed"
+    typical_headers: ["Ticker", "R&D Exp", "Mkt Cap", "BEst Analyst Rtg", "Patents / Trademarks / Copy Rgt"]
+    note: "Uses spaces and special characters in headers"
+  
+  dumac_warehouse:
+    description: "DUMAC Internal Data Warehouse"
+    typical_headers: ["Fund Name", "Long (%LTP)", "Matched_Ticker", "Instr/BB_IndustrySector"]
+    note: "Contains hierarchical headers with slashes, complex naming"
+  
+  n50_test_data:
+    description: "Test Dataset (N=50 Hybrid)"
+    typical_headers: ["Ticker", "R.D.Exp", "Mkt.Cap", "BEst.Analyst.Rtg", "fund_name", "fund_weight"]
+    note: "Uses dots instead of spaces, legacy format"
+
+# ============================================================================
+# FIELD VALIDATION RULES (Optional)
+# ============================================================================
+validation_rules:
+  ticker:
+    required: true
+    type: "character"
+    min_length: 1
+    
+  rd_expense:
+    required: true
+    type: "numeric"
+    valid_range: [0, 1e12]  # 0 to 1 trillion
+    
+  market_cap:
+    required: true
+    type: "numeric"
+    valid_range: [1e6, 1e15]  # 1 million to 1 quadrillion
+    
+  fund_weight:
+    required: false  # Can be calculated if missing
+    type: "numeric"
+    valid_range: [-1, 1]  # -100% to +100% (for short positions)
