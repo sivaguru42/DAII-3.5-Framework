@@ -1,0 +1,23 @@
+# R-specific ignores
+.Rhistory
+.RData
+.Rproj.user/
+
+# Data outputs (team should generate these locally)
+outputs/
+daii_output/
+
+# System files
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+
+# Large data files (over 100MB)
+*.zip
+*.rar
+*.7z
+
+# Log files
+*.log
+
