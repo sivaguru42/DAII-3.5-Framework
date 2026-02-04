@@ -1,0 +1,20 @@
+rd_intensity:
+  weight: 0.3
+  normalization: min_max
+  direction: positive
+analyst_coverage:
+  weight: 0.25
+  normalization: min_max
+  direction: positive
+patent_intensity:
+  weight: 0.2
+  normalization: min_max
+  direction: positive
+news_intensity:
+  weight: 0.15
+  normalization: min_max
+  direction: positive
+growth_intensity:
+  weight: 0.1
+  normalization: min_max
+  direction: positive

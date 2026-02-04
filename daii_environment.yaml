@@ -1,0 +1,36 @@
+# DAII Environment Configuration
+name: daii-3.5
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - r-base=4.3.2
+  - r-essentials
+  - r-renv
+  - r-devtools
+  - python=3.9
+  
+  # Core R packages
+  - r-dplyr
+  - r-tidyr
+  - r-tidyverse
+  - r-data.table
+  - r-ggplot2
+  - r-rmarkdown
+  - r-shiny
+  - r-yaml
+  - r-openxlsx
+  
+  # System dependencies
+  - openssl
+  - curl
+  - libgit2
+  
+variables:
+  R_LIBS_USER: "renv/library"
+  R_ENVIRON_USER: ".Renviron"
+  TZ: "America/New_York"
+  
+  # Memory limits
+  R_MAX_VSIZE: "8Gb"
+  R_MAX_NUM_DLLS: 150

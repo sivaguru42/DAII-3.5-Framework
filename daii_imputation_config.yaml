@@ -1,0 +1,18 @@
+rd_expense:
+  method: industry_median
+  fallback: global_median
+total_assets:
+  method: industry_median
+  fallback: global_median
+analyst_coverage:
+  method: industry_median
+  fallback: global_median
+patent_applications:
+  method: industry_median
+  fallback: zero
+news_volume:
+  method: industry_median
+  fallback: global_median
+revenue_growth:
+  method: industry_median
+  fallback: global_median

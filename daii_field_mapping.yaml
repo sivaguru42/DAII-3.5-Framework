@@ -1,0 +1,68 @@
+ticker:
+  primary: ticker
+  alternatives:
+  - Ticker
+  - Symbol
+  - Company Code
+  - Issuer Ticker
+company_name:
+  primary: company_name
+  alternatives:
+  - Company Name
+  - Name
+  - Issuer Name
+gics_industry:
+  primary: gics_industry
+  alternatives:
+  - GICS Industry
+  - Industry
+  - Sector
+  - GICS.Ind.Grp.Name
+rd_expense:
+  primary: rd_expense
+  alternatives:
+  - R&D Expense
+  - Research and Development Expense
+  - R.D.Exp
+  - Research Expense
+total_assets:
+  primary: total_assets
+  alternatives:
+  - Total Assets
+  - Assets
+  - Mkt.Cap
+  - Market Capitalization
+market_cap:
+  primary: market_cap
+  alternatives:
+  - Market Cap
+  - Market Capitalization
+  - Mkt.Cap
+analyst_coverage:
+  primary: analyst_coverage
+  alternatives:
+  - Analyst Coverage
+  - Number of Analysts
+  - Tot.Analyst.Rec
+  - Analyst Recommendations
+patent_applications:
+  primary: patent_applications
+  alternatives:
+  - Patent Applications
+  - Patents
+  - Patents...Trademarks...Copy.Rgt
+  - Patent Count
+news_volume:
+  primary: news_volume
+  alternatives:
+  - News Volume
+  - News Count
+  - News.Sent
+  - News Sentiment
+revenue_growth:
+  primary: revenue_growth
+  alternatives:
+  - Revenue Growth
+  - Growth
+  - Rev...1.Yr.Gr
+  - 1 Year Growth

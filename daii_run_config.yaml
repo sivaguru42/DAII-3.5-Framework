@@ -1,0 +1,56 @@
+# Run configuration for batch processing
+
+# Analysis modes
+modes:
+  quick:
+    description: "Quick analysis for meetings"
+    modules:
+      - data_loading
+      - scoring
+      - portfolio_aggregation
+      - basic_visualization
+    validation: "minimal"
+    outputs: ["csv", "summary_html"]
+    
+  standard:
+    description: "Standard analysis for reporting"
+    modules: "all"
+    validation: "standard"
+    outputs: ["csv", "excel", "html"]
+    
+  comprehensive:
+    description: "Comprehensive analysis with full validation"
+    modules: "all"
+    validation: "comprehensive"
+    sensitivity_analysis: true
+    outputs: "all"
+    
+  validation_only:
+    description: "Run validation only"
+    modules: ["validation"]
+    outputs: ["validation_report"]
+
+# Batch processing
+batch:
+  enabled: false
+  portfolios:
+    - "DUMAC_TECH_FUND"
+    - "DUMAC_GROWTH_FUND"
+    - "DUMAC_INCOME_FUND"
+    
+  schedule:
+    daily: "09:00"
+    weekly: "Monday 08:00"
+    monthly: "1 06:00"
+    
+  notifications:
+    email_on_success: true
+    email_on_failure: true
+    slack_notifications: false
+
+# Performance
+performance:
+  parallel_processing: true
+  num_cores: 4
+  memory_limit_gb: 8
+  chunk_size: 500

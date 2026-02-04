@@ -1,0 +1,58 @@
+# Database Configuration (if connecting to databases)
+
+connections:
+  # Primary financial database
+  financial_db:
+    type: "postgresql"
+    host: "localhost"
+    port: 5432
+    database: "dumac_financial"
+    username: "${DB_USER}"  # Will be read from environment
+    password: "${DB_PASS}"  # Will be read from environment
+    sslmode: "require"
+    
+    # Connection pooling
+    pool:
+      min: 2
+      max: 10
+      idleTimeout: 30000
+      
+  # Patent database
+  patent_db:
+    type: "mysql"
+    host: "patent-data.dumac.edu"
+    port: 3306
+    database: "patent_db"
+    username: "${PATENT_USER}"
+    password: "${PATENT_PASS}"
+    
+  # News sentiment API
+  news_api:
+    type: "api"
+    endpoint: "https://api.news-sentiment.com/v2"
+    api_key: "${NEWS_API_KEY}"
+    rate_limit: 100  # Requests per minute
+
+queries:
+  # Common queries
+  get_company_data: |
+    SELECT 
+      ticker,
+      company_name,
+      gics_sector,
+      gics_industry,
+      market_cap,
+      r_and_d_expense,
+      total_assets
+    FROM companies
+    WHERE date = :report_date
+    
+  get_portfolio_holdings: |
+    SELECT 
+      fund_id,
+      ticker,
+      shares_held,
+      market_value,
+      percent_of_fund
+    FROM portfolio_holdings
+    WHERE as_of_date = :as_of_date

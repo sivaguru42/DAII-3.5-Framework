@@ -1,0 +1,92 @@
+# Validation Settings
+
+# Portfolio size categories
+portfolio_sizes:
+  micro:
+    min_holdings: 10
+    max_holdings: 50
+    validation_method: "full"
+    estimated_time_minutes: 15
+    
+  standard:
+    min_holdings: 50
+    max_holdings: 200
+    validation_method: "full"
+    estimated_time_minutes: 45
+    
+  large:
+    min_holdings: 200
+    max_holdings: 1000
+    validation_method: "statistical_sampling"
+    sample_size: 50
+    estimated_time_minutes: 30
+    
+  mega:
+    min_holdings: 1000
+    max_holdings: 10000
+    validation_method: "statistical_sampling"
+    sample_size: 100
+    estimated_time_minutes: 60
+
+# Validation checks
+checks:
+  data_quality:
+    - check: "missing_data"
+      threshold: 0.3
+      action: "flag"
+      
+    - check: "outliers"
+      method: "iqr"
+      multiplier: 1.5
+      action: "winsorize"
+      
+    - check: "data_types"
+      expected_types:
+        ticker: "character"
+        market_cap: "numeric"
+        r_and_d: "numeric"
+      
+  scoring:
+    - check: "weight_sum"
+      expected: 1.0
+      tolerance: 0.001
+      
+    - check: "score_range"
+      expected_min: 0
+      expected_max: 100
+      
+    - check: "component_correlation"
+      max_correlation: 0.9
+      
+  portfolio:
+    - check: "weight_sum"
+      expected: 1.0
+      tolerance: 0.001
+      
+    - check: "concentration"
+      hhi_threshold: 1500
+      gini_threshold: 0.7
+      
+    - check: "sector_exposure"
+      max_sector: 0.4
+
+# Validation reporting
+reporting:
+  format: "html"
+  include_sections:
+    - "executive_summary"
+    - "data_quality"
+    - "scoring_validation"
+    - "portfolio_validation"
+    - "recommendations"
+    
+  charts:
+    - "score_distribution"
+    - "component_breakdown"
+    - "sector_comparison"
+    - "top_bottom_innovators"
+    
+  thresholds:
+    pass: 0.9  # 90% of checks must pass
+    warning: 0.7  # 70-90% yields warning
+    fail: 0.7  # Below 70% fails

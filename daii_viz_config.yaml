@@ -1,0 +1,118 @@
+# Visualization Configuration
+
+# Corporate theme for DAII
+theme:
+  name: "daii_corporate"
+  base_font: "Arial"
+  title_font: "Arial"
+  base_size: 11
+  title_size: 14
+  
+  colors:
+    primary: "#1E3A8A"  # Duke Blue
+    secondary: "#00539B"  # Duke Secondary Blue
+    accent: "#E6E6FA"  # Lavender
+    background: "#FFFFFF"
+    grid: "#F0F0F0"
+    
+    qualitative_palette:
+      - "#1E3A8A"  # Duke Blue
+      - "#00539B"  # Secondary Blue
+      - "#6CACE4"  # Light Blue
+      - "#FF6B35"  # Orange
+      - "#00A878"  # Green
+      - "#A4508B"  # Purple
+      
+    sequential_palette: "viridis"
+    divergent_palette: "RdBu"
+
+# Chart types and settings
+charts:
+  score_distribution:
+    type: "histogram"
+    bins: 30
+    fill_color: "#1E3A8A"
+    add_density: true
+    add_mean_line: true
+    
+  component_breakdown:
+    type: "bar"
+    orientation: "horizontal"
+    sort_by: "score"
+    limit_bars: 20
+    
+  sector_comparison:
+    type: "boxplot"
+    fill_by_sector: true
+    add_points: true
+    point_alpha: 0.6
+    
+  portfolio_composition:
+    type: "treemap"
+    group_by: "sector"
+    size_by: "market_value"
+    color_by: "innovation_score"
+    
+  correlation_matrix:
+    type: "corrplot"
+    method: "circle"
+    order: "hclust"
+    col_limit: "RdYlBu"
+
+# Dashboard layout
+dashboard:
+  grid:
+    rows: 4
+    columns: 3
+    gutter: 20
+    
+  cards:
+    executive_summary:
+      position: [1, 1]
+      size: [2, 2]
+      type: "summary_card"
+      
+    score_distribution:
+      position: [1, 3]
+      size: [2, 1]
+      type: "histogram"
+      
+    top_innovators:
+      position: [2, 3]
+      size: [2, 1]
+      type: "table"
+      
+    sector_breakdown:
+      position: [3, 1]
+      size: [2, 1]
+      type: "treemap"
+      
+    component_scores:
+      position: [3, 3]
+      size: [2, 1]
+      type: "radar"
+      
+    validation_status:
+      position: [4, 1]
+      size: [3, 1]
+      type: "validation_panel"
+
+# Export settings
+export:
+  formats:
+    png:
+      dpi: 300
+      width: 10
+      height: 8
+      units: "in"
+      
+    pdf:
+      width: 10
+      height: 8
+      units: "in"
+      pointsize: 12
+      
+    interactive:
+      tooltip: true
+      zoom: true
+      download: true
