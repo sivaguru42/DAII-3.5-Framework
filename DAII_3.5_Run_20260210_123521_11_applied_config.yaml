@@ -1,0 +1,34 @@
+module4_integration:
+  integration_date: '2026-02-10'
+  source_script: DAII_3.5_PHASE_1_2_INTEGRATED_v3.5.9_FINAL_02_10_2026.R
+  company_scores_source: 04_company_level_scores.csv
+  strategies_executed:
+  - equal_weight_quartile
+  - score_weighted
+  - quartile_tilted
+  validation_passed: yes
+  config_files_used:
+  - daii_module4_bridge_config.yaml
+  - daii_portfolio_config.yaml
+  - daii_run_config.yaml
+applied_module4_config:
+  rd_intensity_score: R_D_Score
+  analyst_coverage_score: Analyst_Coverage_Score
+  patent_intensity_score: Patent_Score
+  news_intensity_score: News_Score
+  growth_intensity_score: Growth_Score
+  daii_3_5_score: DAII_3_5_Score
+applied_portfolio_config:
+  portfolio:
+    ticker_col: ticker
+    weight_col: fund_weight
+    fund_col: fund_name
+    date_col: as_of_date
+    merge_strategy: left
+    metrics:
+    - weighted_daii_score
+    - sector_exposure
+    - innovation_concentration
+    reporting:
+      format: dataframe
+      include_details: yes

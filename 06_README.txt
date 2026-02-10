@@ -1,6 +1,6 @@
 DAII 3.5 Pipeline Execution Summary
-Generated: 2026-02-09 15:46:00.034674
-Version: 3.5.8 (Field Mapping Integrated + Company/Fund Separation)
+Generated: 2026-02-10 12:35:21.541715
+Version: 3.5.9 (Field Mapping Integrated + Company/Fund Separation + QUARTILE FIX)
 
 EXECUTION RESULTS:
 - Input rows (fund-level): 589
@@ -11,12 +11,18 @@ EXECUTION RESULTS:
 - Composite score calculated: YES
 - Innovation quartiles assigned: YES
 
-KEY IMPROVEMENTS:
+KEY IMPROVEMENTS v3.5.9:
 1. Field mapping system integrated
 2. Company/fund data separation applied
 3. Scoring performed at company level (N=50)
-4. Statistics reflect true company distribution
-5. Scores correctly joined to fund holdings
+4. Quartiles calculated ONLY on company data (fixes 446-in-Q4 issue)
+5. Statistics reflect true company distribution
+6. Scores correctly joined to fund holdings
+
+QUARTILE FIX DETAILS:
+- Previous version: Quartiles calculated on fund data (589 rows) -> 446 holdings in Q4
+- Current version: Quartiles calculated on company data (50 rows) -> balanced distribution
+- Company quartiles: Q1=13, Q2=12, Q3=12, Q4=13 companies
 
 DATA STRUCTURE:
 - Company dataset: 50 rows × company metrics
@@ -25,9 +31,10 @@ DATA STRUCTURE:
 
 FIELD MAPPING STATUS: APPLIED
 COMPANY/FUND SEPARATION: APPLIED
+QUARTILE FIX APPLIED: YES
 
 NOTES:
 - Statistics in 05_score_statistics.csv are based on 50 companies, not 589 fund holdings
-- This fixes the Q1-Q3 clustering issue from previous runs
-- Output ready for Modules 4-9 (portfolio construction)
+- Quartile distribution is now meaningful for portfolio construction
+- Output ready for Modules 4-9
 

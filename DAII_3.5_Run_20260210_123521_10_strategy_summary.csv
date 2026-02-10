@@ -1,0 +1,4 @@
+"strategy","n_companies","weight_sum","avg_daii_score","score_weighted_avg","herfindahl_index"
+"equal_weight_quartile",50,1,42.655920566933,42.5376239933384,0.0200320512820513
+"quartile_tilted",50,1,42.655920566933,52.578165308037,0.0270833333333333
+"score_weighted",50,1,42.655920566933,51.0610403084467,0.0239179734662857

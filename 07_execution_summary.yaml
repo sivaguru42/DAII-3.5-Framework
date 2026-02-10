@@ -1,5 +1,5 @@
 execution_timestamp: 1.7707e+09
-version: 3.5.8 (Field Mapping Integrated + Company/Fund Separation)
+version: 3.5.9 (Field Mapping Integrated + Company/Fund Separation + Quartile Fix)
 status: COMPLETED
 input_rows_fund_level: 589
 unique_companies: 50
