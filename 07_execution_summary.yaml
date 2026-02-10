@@ -1,0 +1,17 @@
+execution_timestamp: 1.7707e+09
+version: 3.5.8 (Field Mapping Integrated + Company/Fund Separation)
+status: COMPLETED
+input_rows_fund_level: 589
+unique_companies: 50
+company_level_rows: 50
+field_mapping_applied: yes
+company_fund_separation_applied: yes
+component_scores_calculated: 5
+composite_score_calculated: yes
+quartiles_assigned: yes
+na_composite_score: 0
+na_composite_pct: 0.0
+company_score_mean: 42.6559
+company_score_sd: 19.1851
+company_score_range: 0 to 100
+quartile_counts: "\nQ1 Q2 Q3 Q4 \n13 12 12 13 "

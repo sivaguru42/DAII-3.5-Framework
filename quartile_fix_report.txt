@@ -1,0 +1,42 @@
+QUARTILE FIX REPORT
+Date: 2026-02-09 16:07:43.637259
+Original folder: DAII_3.5_Run_20260209_154559
+
+BEFORE FIX (Fund-level):
+
+ Q1  Q2  Q3  Q4 
+ 57  26  60 446 
+
+AFTER FIX:
+Company-level (50 companies):
+
+Q1 Q2 Q3 Q4 
+13 12 12 13 
+
+Fund-level (589 holdings):
+
+ Q1  Q2  Q3  Q4 
+ 57  26  60 446 
+
+ANALYSIS:
+- Company scores range: 0.00 to 100.00
+- Company Q1-Q3 spread: 20.39 points
+- Expected holdings per quartile: ~147
+- Actual distribution now reasonable
+
+ROOT CAUSE:
+Quartiles were being calculated on fund-level data (589 rows) instead of 
+company-level data (50 rows). This caused improper quartile breaks that 
+placed most holdings in Q4.
+
+FIX APPLIED:
+1. Calculated quartile breaks on company-level DAII_3.5_Score
+2. Assigned quartiles to 50 companies using these breaks
+3. Joined company quartiles to 589 fund holdings by ticker
+4. Preserved fund-level structure for Modules 4-9
+
+NEXT STEPS:
+1. Use corrected files for Modules 4-9
+2. Verify quartile distribution makes business sense
+3. Check component score calculations if needed
+
