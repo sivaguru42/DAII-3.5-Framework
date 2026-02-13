@@ -1,0 +1,406 @@
+🔍 COMPLETE SOLUTION: RECOVERING THE SYN-TO-REAL TICKER MAPPING
+This is a classic "entity resolution" problem. I'll provide you with a defensible, multi-stage matching approach that uses all available fields and includes validation steps.
+
+📋 STAGE 1: UNDERSTAND THE DATA STRUCTURE
+Raw Bloomberg Data (Fund-Holding Level)
+text
+N200_FINAL_StrategicDUMACPortfolioDistribution_BBergUploadRawData_*.csv
+- Multiple rows per ticker (one per fund)
+- Fields: Ticker, fund_weight, Mkt.Cap, R.D.Exp, Patents...Trademarks...Copy.Rgt, GICS.Ind.Grp.Name
+Company Snapshot (Synthetic Company Level)
+text
+N200_company_snapshot.csv
+- One row per SYNxxx
+- Fields: ticker (SYNxxx), fund_weight (summed), market_cap, rd_expense, patent_activity, industry
+Key Insight
+The fund_weight in the snapshot is the sum of all fund weights for that company from the raw data. This is our strongest matching signal.
+
+🔧 STAGE 2: RECONSTRUCTION SCRIPT
+Run this script to create the mapping table. It uses a weighted matching score based on multiple fields:
+
+# ============================================================================
+# DAII 3.5 – RECONSTRUCT SYN-TO-REAL TICKER MAPPING
+# Version: 1.0 | Date: 2026-02-13
+# Purpose: Match synthetic SYNxxx tickers to real company tickers
+# Inputs: Raw Bloomberg data + Company snapshot
+# Output: mapping_table.csv with confidence scores
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 0. USER PATHS – VERIFY BEFORE RUNNING
+# ----------------------------------------------------------------------------
+SCRIPT_DIR <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\R\\scripts"
+RAW_DIR    <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\raw"
+INPUT_DIR  <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\input"
+OUTPUT_DIR <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\output"
+
+setwd(SCRIPT_DIR)
+
+# ----------------------------------------------------------------------------
+# 1. LOAD REQUIRED PACKAGES
+# ----------------------------------------------------------------------------
+library(dplyr)
+library(tidyr)
+library(stringdist)
+
+# ----------------------------------------------------------------------------
+# 2. LOAD RAW BLOOMBERG DATA (FUND-HOLDING LEVEL)
+# ----------------------------------------------------------------------------
+cat("\n📥 LOADING RAW BLOOMBERG DATA...\n")
+
+# Find the most recent raw file
+raw_files <- list.files(RAW_DIR, pattern = "N200_FINAL.*\\.csv$", full.names = TRUE)
+if (length(raw_files) == 0) stop("❌ No raw Bloomberg files found.")
+raw_file <- raw_files[1]  # Use the first one
+cat("   Using:", basename(raw_file), "\n")
+
+raw_data <- read.csv(raw_file, stringsAsFactors = FALSE)
+cat("   Loaded", nrow(raw_data), "rows,", ncol(raw_data), "columns\n")
+
+# Standardize column names
+names(raw_data) <- gsub("\\.+", "_", names(raw_data))
+names(raw_data) <- gsub("__", "_", names(raw_data))
+
+# Identify key columns (with fuzzy matching)
+find_col <- function(pattern, df) {
+  matches <- grep(pattern, names(df), value = TRUE, ignore.case = TRUE)
+  if (length(matches) > 0) matches[1] else NULL
+}
+
+ticker_col <- find_col("Ticker", raw_data)
+fund_weight_col <- find_col("fund_weight", raw_data)
+mkt_cap_col <- find_col("Mkt_Cap|Market_Cap", raw_data)
+rd_col <- find_col("R_D_Exp|R\\.D\\.Exp", raw_data)
+patent_col <- find_col("Patent|Trademark", raw_data)
+industry_col <- find_col("GICS|Industry|Sector", raw_data)
+
+if (is.null(ticker_col)) stop("❌ Cannot find ticker column.")
+
+cat("\n📋 Key columns identified:\n")
+cat("   Ticker:", ticker_col, "\n")
+cat("   Fund Weight:", fund_weight_col %||% "NOT FOUND", "\n")
+cat("   Market Cap:", mkt_cap_col %||% "NOT FOUND", "\n")
+cat("   R&D Expense:", rd_col %||% "NOT FOUND", "\n")
+cat("   Patent Activity:", patent_col %||% "NOT FOUND", "\n")
+cat("   Industry:", industry_col %||% "NOT FOUND", "\n\n")
+
+# ----------------------------------------------------------------------------
+# 3. AGGREGATE RAW DATA TO COMPANY LEVEL
+# ----------------------------------------------------------------------------
+cat("🔄 Aggregating raw data to company level...\n")
+
+company_raw <- raw_data %>%
+  group_by(!!sym(ticker_col)) %>%
+  summarise(
+    # Sum fund weights (this is critical – matches snapshot's fund_weight)
+    fund_weight_sum = sum(!!sym(fund_weight_col), na.rm = TRUE),
+    
+    # Take first non-NA for other fields
+    market_cap = if (!is.null(mkt_cap_col)) first(na.omit(!!sym(mkt_cap_col))) else NA_real_,
+    rd_expense = if (!is.null(rd_col)) first(na.omit(!!sym(rd_col))) else NA_real_,
+    patent_activity = if (!is.null(patent_col)) first(na.omit(!!sym(patent_col))) else NA_real_,
+    industry = if (!is.null(industry_col)) first(na.omit(as.character(!!sym(industry_col)))) else "Unknown",
+    
+    # Count funds holding this company
+    n_funds = n(),
+    .groups = "drop"
+  ) %>%
+  rename(real_ticker = 1) %>%
+  filter(!is.na(real_ticker) & real_ticker != "") %>%
+  mutate(
+    # Round market cap to nearest billion for fuzzy matching
+    market_cap_billions = round(market_cap / 1e9, 0),
+    # Clean industry names
+    industry = trimws(industry)
+  )
+
+cat("✅ Aggregated", nrow(company_raw), "unique real companies.\n\n")
+
+# ----------------------------------------------------------------------------
+# 4. LOAD SYNTHETIC COMPANY SNAPSHOT
+# ----------------------------------------------------------------------------
+cat("📥 LOADING SYNTHETIC COMPANY SNAPSHOT...\n")
+
+snapshot_file <- file.path(INPUT_DIR, "N200_company_snapshot.csv")
+if (!file.exists(snapshot_file)) stop("❌ Snapshot not found.")
+
+snapshot <- read.csv(snapshot_file, stringsAsFactors = FALSE) %>%
+  filter(!is.na(ticker) & ticker != "" & ticker != "NA") %>%  # Remove NVIDIA NA row
+  mutate(
+    market_cap_billions = round(market_cap / 1e9, 0),
+    industry = trimws(industry)
+  )
+
+cat("✅ Loaded", nrow(snapshot), "synthetic companies (SYN001 through SYN", nrow(snapshot), ")\n\n")
+
+# ----------------------------------------------------------------------------
+# 5. MULTI-STAGE MATCHING ALGORITHM
+# ----------------------------------------------------------------------------
+cat("🔍 STAGE 1: EXACT MATCHES ON FUND WEIGHT + INDUSTRY\n")
+
+# Stage 1: Exact matches on fund_weight_sum + industry
+# This is our highest confidence match
+exact_matches <- snapshot %>%
+  inner_join(
+    company_raw %>% select(real_ticker, fund_weight_sum, industry, market_cap_billions),
+    by = c("fund_weight" = "fund_weight_sum", "industry")
+  ) %>%
+  group_by(ticker) %>%
+  slice(1) %>%  # Take first if multiple matches (shouldn't happen with exact fund weight)
+  ungroup()
+
+cat("   Found", nrow(exact_matches), "exact matches\n")
+
+# Stage 2: Fuzzy matches on fund weight (±5%) + same industry
+cat("\n🔍 STAGE 2: FUZZY MATCHES ON FUND WEIGHT (±5%) + SAME INDUSTRY\n")
+
+fuzzy_matches <- snapshot %>%
+  filter(!ticker %in% exact_matches$ticker) %>%
+  cross_join(company_raw %>% select(real_ticker, fund_weight_sum, industry, market_cap_billions, rd_expense, patent_activity)) %>%
+  filter(industry == industry) %>%
+  mutate(
+    weight_diff_pct = abs(fund_weight - fund_weight_sum) / fund_weight_sum * 100,
+    is_match = weight_diff_pct <= 5  # Within 5% tolerance
+  ) %>%
+  filter(is_match) %>%
+  group_by(ticker) %>%
+  mutate(
+    # Score the match quality (lower is better)
+    match_score = weight_diff_pct
+  ) %>%
+  slice_min(match_score, n = 1) %>%  # Take best match
+  ungroup()
+
+cat("   Found", nrow(fuzzy_matches), "fuzzy matches\n")
+
+# Stage 3: Multi-field matching for remaining companies
+cat("\n🔍 STAGE 3: MULTI-FIELD WEIGHTED MATCHING\n")
+
+remaining_syn <- snapshot %>%
+  filter(!ticker %in% exact_matches$ticker,
+         !ticker %in% fuzzy_matches$ticker)
+
+remaining_real <- company_raw %>%
+  filter(!real_ticker %in% exact_matches$real_ticker,
+         !real_ticker %in% fuzzy_matches$real_ticker)
+
+if (nrow(remaining_syn) > 0 && nrow(remaining_real) > 0) {
+  
+  # Create all possible combinations
+  multi_matches <- remaining_syn %>%
+    cross_join(remaining_real) %>%
+    mutate(
+      # Calculate individual match scores (0-1, lower is better)
+      industry_match = ifelse(industry.x == industry.y, 0, 1),
+      
+      mcap_diff = abs(market_cap_billions.x - market_cap_billions.y) / 
+                  pmax(market_cap_billions.x, market_cap_billions.y, 1),
+      
+      rd_diff = abs(rd_expense.x - rd_expense.y) / 
+                pmax(rd_expense.x, rd_expense.y, 1),
+      
+      patent_diff = abs(patent_activity.x - patent_activity.y) / 
+                    pmax(patent_activity.x, patent_activity.y, 1),
+      
+      weight_diff = abs(fund_weight.x - fund_weight_sum.y) / 
+                    pmax(fund_weight.x, fund_weight_sum.y, 0.001),
+      
+      # Weighted composite score (customize weights based on confidence)
+      composite_score = 
+        0.3 * industry_match +      # Industry match is important
+        0.2 * mcap_diff +           # Market cap
+        0.2 * rd_diff +             # R&D expense
+        0.2 * patent_diff +          # Patent activity
+        0.1 * weight_diff            # Fund weight (less reliable after aggregation)
+    ) %>%
+    group_by(ticker.x) %>%
+    slice_min(composite_score, n = 1) %>%
+    ungroup() %>%
+    rename(ticker = ticker.x, real_ticker = real_ticker)
+  
+  cat("   Found", nrow(multi_matches), "multi-field matches\n")
+} else {
+  multi_matches <- data.frame()
+}
+
+# ----------------------------------------------------------------------------
+# 6. COMBINE ALL MATCHES
+# ----------------------------------------------------------------------------
+all_matches <- bind_rows(
+  exact_matches %>% select(ticker, real_ticker, industry, fund_weight, market_cap_billions) %>%
+    mutate(match_type = "exact", confidence = 1.0),
+  
+  fuzzy_matches %>% select(ticker, real_ticker, industry = industry.x, 
+                           fund_weight = fund_weight.x, market_cap_billions = market_cap_billions.x) %>%
+    mutate(match_type = "fuzzy", confidence = 0.9),
+  
+  multi_matches %>% select(ticker, real_ticker, industry = industry.x,
+                           fund_weight = fund_weight.x, market_cap_billions = market_cap_billions.x) %>%
+    mutate(match_type = "multi", confidence = 0.7)
+)
+
+# Add NVIDIA manually (from your earlier identification)
+if (!"NA" %in% all_matches$ticker) {
+  nvidia_match <- data.frame(
+    ticker = "NA",
+    real_ticker = "NVDA US",
+    industry = "Semiconductors & Semiconductor Equipment",
+    fund_weight = 5.797028,
+    market_cap_billions = 4510,
+    match_type = "manual",
+    confidence = 1.0,
+    stringsAsFactors = FALSE
+  )
+  all_matches <- bind_rows(all_matches, nvidia_match)
+}
+
+cat("\n✅ TOTAL MATCHES:", nrow(all_matches), "of", nrow(snapshot), "\n")
+cat("   Exact matches   :", nrow(exact_matches), "\n")
+cat("   Fuzzy matches   :", nrow(fuzzy_matches), "\n")
+cat("   Multi-field     :", nrow(multi_matches), "\n")
+cat("   Manual (NVIDIA) : 1\n\n")
+
+# ----------------------------------------------------------------------------
+# 7. VALIDATION CHECKS
+# ----------------------------------------------------------------------------
+cat("🔍 VALIDATION CHECKS:\n")
+
+# Check 1: No duplicate synthetic tickers
+dup_syn <- all_matches %>% group_by(ticker) %>% filter(n() > 1)
+if (nrow(dup_syn) > 0) {
+  cat("⚠️  WARNING:", nrow(dup_syn), "duplicate synthetic tickers found\n")
+  print(dup_syn)
+} else {
+  cat("✅ No duplicate synthetic tickers\n")
+}
+
+# Check 2: No duplicate real tickers
+dup_real <- all_matches %>% group_by(real_ticker) %>% filter(n() > 1)
+if (nrow(dup_real) > 0) {
+  cat("⚠️  WARNING:", nrow(dup_real), "duplicate real tickers found\n")
+  print(dup_real)
+} else {
+  cat("✅ No duplicate real tickers\n")
+}
+
+# Check 3: Top 10 by fund weight are matched
+top10_syn <- snapshot %>% 
+  arrange(desc(fund_weight)) %>% 
+  head(10) %>% 
+  pull(ticker)
+
+top10_matched <- all_matches %>% filter(ticker %in% top10_syn)
+if (nrow(top10_matched) == 10) {
+  cat("✅ All top 10 holdings matched\n")
+} else {
+  cat("⚠️  Only", nrow(top10_matched), "of top 10 holdings matched\n")
+}
+
+cat("\n")
+
+# ----------------------------------------------------------------------------
+# 8. EXPORT RESULTS
+# ----------------------------------------------------------------------------
+cat("💾 SAVING MAPPING TABLE...\n")
+
+# Create output filename with timestamp
+timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+output_file <- file.path(OUTPUT_DIR, paste0("syn_to_real_mapping_", timestamp, ".csv"))
+
+# Reorder columns for readability
+final_mapping <- all_matches %>%
+  select(ticker, real_ticker, match_type, confidence, fund_weight, 
+         market_cap_billions, industry) %>%
+  arrange(desc(fund_weight))
+
+write.csv(final_mapping, output_file, row.names = FALSE)
+
+cat("✅ Mapping saved to:\n   ", output_file, "\n\n")
+
+# ----------------------------------------------------------------------------
+# 9. CREATE PATENTSVIEW QUERY LIST (TOP 20 HOLDINGS)
+# ----------------------------------------------------------------------------
+cat("🎯 CREATING PATENTSVIEW QUERY LIST (TOP 20 HOLDINGS)...\n")
+
+# Get top 20 synthetic tickers by fund weight
+top20_syn <- snapshot %>%
+  arrange(desc(fund_weight)) %>%
+  head(20) %>%
+  pull(ticker)
+
+# Map to real companies
+patentsview_pilot <- final_mapping %>%
+  filter(ticker %in% top20_syn) %>%
+  mutate(
+    search_name = case_when(
+      real_ticker == "NVDA US" ~ "NVIDIA",
+      grepl("US$", real_ticker) ~ gsub(" US$", "", real_ticker),  # Remove " US" suffix
+      TRUE ~ real_ticker
+    )
+  ) %>%
+  select(ticker, real_ticker, search_name, fund_weight, match_type, confidence)
+
+cat("\n📋 PILOT COMPANIES FOR PATENTSVIEW API:\n")
+print(patentsview_pilot)
+
+# Save pilot list
+pilot_file <- file.path(OUTPUT_DIR, paste0("patentsview_pilot_", timestamp, ".csv"))
+write.csv(patentsview_pilot, pilot_file, row.names = FALSE)
+
+cat("\n✅ Pilot list saved to:\n   ", pilot_file, "\n\n")
+
+# ----------------------------------------------------------------------------
+# 10. SUMMARY REPORT
+# ----------------------------------------------------------------------------
+cat("\n", paste(rep("=", 70), collapse = ""), "\n")
+cat("🎯 SYN-TO-REAL MAPPING RECONSTRUCTION COMPLETE\n")
+cat("\n📊 SUMMARY:\n")
+cat("   Total synthetic companies:", nrow(snapshot), "\n")
+cat("   Total real companies found:", length(unique(company_raw$real_ticker)), "\n")
+cat("   Matches made:", nrow(final_mapping), "\n")
+cat("\n📁 OUTPUT FILES:\n")
+cat("   1. syn_to_real_mapping_", timestamp, ".csv - Full mapping table\n", sep = "")
+cat("   2. patentsview_pilot_", timestamp, ".csv - Top 20 holdings for API pilot\n", sep = "")
+cat("\n🚀 NEXT STEPS:\n")
+cat("   1. Review the mapping table – verify top 10 matches manually\n")
+cat("   2. Use patentsview_pilot.csv for PatentsView API queries\n")
+cat("   3. For unmatched companies, consider manual lookup or additional fuzzy matching\n")
+cat(paste(rep("=", 70), collapse = ""), "\n")
+
+🎯 WHY THIS APPROACH WORKS
+Stage	Method	Confidence	Rationale
+1	Exact match on fund_weight + industry	Very High	fund_weight in snapshot is sum of raw weights. If both match exactly, it's almost certainly the same company.
+2	Fuzzy match on fund_weight (±5%) + same industry	High	Accounts for minor rounding differences in aggregation.
+3	Multi-field weighted matching	Medium	Uses all available fields with custom weights. Provides matches for remaining companies.
+Manual	NVIDIA hard-coded	Very High	Confirmed from anomaly detection output.
+📋 EXPECTED OUTPUT EXAMPLE
+ticker	real_ticker	match_type	confidence	fund_weight	industry
+NA	NVDA US	manual	1.00	5.797	Semiconductors
+SYN130	MSFT US	exact	1.00	0.0498	Technology
+SYN067	AAPL US	fuzzy	0.90	0.0497	Technology
+SYN190	GOOGL US	multi	0.70	0.0404	Technology
+...	...	...	...	...	...
+✅ FOR PATENTSVIEW PILOT (TOP 20 HOLDINGS)
+The script automatically creates patentsview_pilot_[timestamp].csv with:
+
+ticker	real_ticker	search_name	confidence
+NA	NVDA US	NVIDIA	1.00
+SYN130	MSFT US	MSFT	1.00
+SYN067	AAPL US	AAPL	1.00
+...	...	...	...
+This gives you 19 real companies + NVIDIA to query via the PatentsView API.
+
+🔄 NEXT STEPS AFTER MAPPING
+Review the mapping table – manually verify top 10 matches (e.g., check if SYN130 really should be Microsoft based on market cap, industry)
+
+Run PatentsView pilot using the search_name column
+
+For any low-confidence matches, use additional validation:
+
+Check employee count if available
+
+Look up headquarters location
+
+Compare revenue figures
+
+This approach is defensible, documented, and gives you a clear path forward.
