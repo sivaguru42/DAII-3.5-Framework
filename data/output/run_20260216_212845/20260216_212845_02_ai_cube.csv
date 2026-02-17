@@ -1,0 +1,74 @@
+ticker,ai_score,innovation_score,strategic_profile,ai_exposure,innovation_exposure
+005930 KS,0.84,0.7,Balanced Performer,Medium,Medium
+005930 KS,0.93,0.775,AI Pioneer,High,High
+6501 JT,0.36,0.4,Underperformer,Low,Low
+8TRA GR,0.4725,0.525,Underperformer,Low,Low
+9984 JT,0.775,0.775,Balanced Performer,Medium,High
+ADBE US,0.875,0.625,AI Focused (Low Innovation),High,Low
+ADBE US,0.875,0.625,AI Focused (Low Innovation),High,Low
+AIEQ US,0.525,0.525,Underperformer,Low,Low
+AIQ US,0.525,0.525,Underperformer,Low,Low
+AMD US,0.9375,0.625,AI Focused (Low Innovation),High,Low
+AMD US,1.05,0.7,Balanced Performer,High,Medium
+AMT US,0.475,0.475,Underperformer,Low,Low
+AMZN US,0.6,0.6,Underperformer,Low,Low
+AMZN US,0.6,0.6,Underperformer,Low,Low
+ANET US,0.54,0.45,Underperformer,Low,Low
+APD US,0.36,0.45,Underperformer,Low,Low
+ASML US,0.8625,0.575,Underperformer,Medium,Low
+ASML US,0.8625,0.575,AI Focused (Low Innovation),High,Low
+BABA US,0.55,0.55,Underperformer,Low,Low
+BABA US,0.6,0.6,Underperformer,Low,Low
+BABA US,0.6,0.6,Underperformer,Low,Low
+BIO US,0.66,0.55,Underperformer,Low,Low
+BOTZ US,0.525,0.525,Underperformer,Low,Low
+CAT US,0.315,0.35,Underperformer,Low,Low
+CAT US,0.315,0.35,Underperformer,Low,Low
+CRM US,0.595,0.425,Underperformer,Low,Low
+CRM US,0.595,0.425,Underperformer,Low,Low
+CVX US,0.175,0.25,Underperformer,Low,Low
+CVX US,0.175,0.25,Underperformer,Low,Low
+DE US,0.5625,0.625,Underperformer,Low,Low
+DE US,0.5625,0.625,Underperformer,Low,Medium
+DUK US,0.35,0.7,Underperformer,Low,Medium
+GE US,0.72,0.8,Balanced Performer,Medium,High
+HDB US,0.7,0.7,Balanced Performer,Medium,Medium
+HDB US,0.7,0.7,Balanced Performer,Medium,Medium
+IBM US,0.98,0.7,Balanced Performer,High,Medium
+IBM US,0.98,0.7,Balanced Performer,High,Medium
+INF US,0.6,0.6,Underperformer,Low,Low
+INTC US,1.1625,0.775,AI Pioneer,High,High
+INTC US,1.1625,0.775,AI Pioneer,High,High
+J US,0.775,0.775,Balanced Performer,Medium,High
+JBL US,0.66,0.55,Underperformer,Low,Low
+KO US,0.85,0.85,Balanced Performer,Medium,High
+LIN US,0.5,0.625,Underperformer,Low,Medium
+LLY US,0.66,0.55,Underperformer,Low,Low
+LMT US,0.72,0.8,Balanced Performer,Medium,High
+LMT US,0.72,0.8,Balanced Performer,Medium,High
+META US,1.105,0.85,AI Pioneer,High,High
+META US,1.105,0.85,AI Pioneer,High,High
+MSFT US,1.015,0.725,Balanced Performer,High,Medium
+MSFT US,1.085,0.775,AI Pioneer,High,High
+MU US,0.975,0.65,Balanced Performer,High,Medium
+NEE US,0.325,0.65,Underperformer,Low,Medium
+NET US,0.665,0.475,Underperformer,Low,Low
+NET US,0.665,0.475,Underperformer,Low,Low
+NVDA US,1.2,0.8,AI Pioneer,High,High
+NVDA US,1.2,0.8,AI Pioneer,High,High
+ORCL US,0.7,0.5,Underperformer,Medium,Low
+PCOR US,0.875,0.625,Balanced Performer,High,Medium
+PG US,0.775,0.775,Balanced Performer,Medium,High
+PG US,0.775,0.775,Balanced Performer,Medium,High
+QTUM US,0.65,0.65,Underperformer,Low,Medium
+ROBT US,0.65,0.65,Underperformer,Low,Medium
+SAP GR,0.77,0.55,Underperformer,Medium,Low
+SMCI US,0.66,0.55,Underperformer,Low,Low
+SNPS US,0.77,0.55,Underperformer,Medium,Low
+SPOT US,0.8125,0.625,Balanced Performer,Medium,Medium
+TSLA US,0.6875,0.625,Balanced Performer,Medium,Medium
+TSLA US,0.6875,0.625,Balanced Performer,Medium,Medium
+V US,0.68,0.85,Innovation Leader (Low AI),Low,High
+V US,0.68,0.85,Innovation Leader (Low AI),Low,High
+XOM US,0.385,0.55,Underperformer,Low,Low
+XOM US,0.385,0.55,Underperformer,Low,Low
