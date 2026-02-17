@@ -1,0 +1,13 @@
+run_timestamp: 20260216_212845
+version: 4.0 FINAL
+date: '2026-02-16'
+n_companies: 73
+n_ai_leaders: 18
+n_anomalies: 8
+files_used:
+  panel: N200_Hybrid_Panel_Data_Sample.csv
+  fundamentals: N200_FINAL_StrategicDUMACPortfolioDistribution_BBergUploadRawData_cleaned.csv
+  snapshot: N200_company_snapshot.csv
+directories:
+  raw: C:\Users\sganesan\OneDrive - dumac.duke.edu\DAII\data\raw
+  output: C:\Users\sganesan\OneDrive - dumac.duke.edu\DAII\data\output/run_20260216_212845
