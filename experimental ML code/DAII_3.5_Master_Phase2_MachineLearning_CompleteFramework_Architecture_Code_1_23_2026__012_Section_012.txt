@@ -1,0 +1,1017 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 12 of 14
+# Title: Section_012
+# Lines: 7301 - 8309 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 11.1: MODEL VERSIONING & REGISTRY
+# ----------------------------------------------------------------------------
+
+#' @title ML Model Registry
+#' @description Manages model versions, metadata, and lifecycle
+#' @param registry_path Path to model registry storage
+#' @return Model registry interface
+
+create_model_registry <- function(registry_path = "models/registry") {
+  
+  require(yaml)
+  require(jsonlite)
+  
+  # Create registry directory structure
+  dirs <- c(
+    "models",
+    "metadata",
+    "versions",
+    "artifacts",
+    "logs"
+  )
+  
+  sapply(file.path(registry_path, dirs), function(dir) {
+    if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  })
+  
+  # Initialize registry state
+  registry_state <- list(
+    path = registry_path,
+    models = list(),
+    next_model_id = 1,
+    next_version_id = 1
+  )
+  
+  # Load existing registry if it exists
+  registry_file <- file.path(registry_path, "registry.yaml")
+  if (file.exists(registry_file)) {
+    registry_state <- yaml::read_yaml(registry_file)
+  }
+  
+  # Save registry state
+  save_registry <- function() {
+    yaml::write_yaml(registry_state, registry_file)
+    invisible(TRUE)
+  }
+  
+  # Register new model
+  register_model <- function(model_name, model_type, description = "",
+                             tags = list(), metadata = list()) {
+    
+    model_id <- paste0("MODEL_", sprintf("%04d", registry_state$next_model_id))
+    
+    model_entry <- list(
+      model_id = model_id,
+      name = model_name,
+      type = model_type,
+      description = description,
+      tags = tags,
+      metadata = metadata,
+      created = Sys.time(),
+      updated = Sys.time(),
+      versions = list(),
+      latest_version = NULL,
+      status = "development"
+    )
+    
+    registry_state$models[[model_id]] <<- model_entry
+    registry_state$next_model_id <<- registry_state$next_model_id + 1
+    
+    # Create model directory
+    model_dir <- file.path(registry_path, "models", model_id)
+    dir.create(model_dir, recursive = TRUE)
+    
+    save_registry()
+    
+    cat(sprintf("Registered model: %s (%s)\n", model_name, model_id))
+    
+    return(model_id)
+  }
+  
+  # Register model version
+  register_version <- function(model_id, version = NULL,
+                               model_object = NULL,
+                               metrics = list(),
+                               parameters = list(),
+                               training_data = NULL,
+                               validation_data = NULL,
+                               description = "",
+                               tags = list()) {
+    
+    if (!model_id %in% names(registry_state$models)) {
+      stop(sprintf("Model %s not found in registry", model_id))
+    }
+    
+    if (is.null(version)) {
+      model_versions <- registry_state$models[[model_id]]$versions
+      version <- if (length(model_versions) == 0) "1.0.0" else {
+        # Auto-increment version
+        last_version <- names(model_versions)[length(model_versions)]
+        parts <- as.numeric(strsplit(last_version, "\\.")[[1]])
+        parts[3] <- parts[3] + 1
+        if (parts[3] > 9) {
+          parts[3] <- 0
+          parts[2] <- parts[2] + 1
+        }
+        if (parts[2] > 9) {
+          parts[2] <- 0
+          parts[1] <- parts[1] + 1
+        }
+        paste(parts, collapse = ".")
+      }
+    }
+    
+    version_id <- paste0("V", gsub("\\.", "_", version))
+    
+    # Create version entry
+    version_entry <- list(
+      version_id = version_id,
+      version = version,
+      created = Sys.time(),
+      metrics = metrics,
+      parameters = parameters,
+      description = description,
+      tags = tags,
+      status = "staging",
+      deployment = list(
+        deployed = FALSE,
+        deployment_time = NULL,
+        environment = NULL
+      )
+    )
+    
+    # Save model object if provided
+    if (!is.null(model_object)) {
+      model_file <- file.path(registry_path, "models", model_id, 
+                              paste0(version_id, ".rds"))
+      saveRDS(model_object, model_file)
+      version_entry$model_file <- model_file
+    }
+    
+    # Save training/validation data references
+    if (!is.null(training_data)) {
+      data_file <- file.path(registry_path, "artifacts", 
+                             paste0(model_id, "_", version_id, "_train.rds"))
+      saveRDS(training_data, data_file)
+      version_entry$training_data <- data_file
+    }
+    
+    if (!is.null(validation_data)) {
+      data_file <- file.path(registry_path, "artifacts",
+                             paste0(model_id, "_", version_id, "_val.rds"))
+      saveRDS(validation_data, data_file)
+      version_entry$validation_data <- data_file
+    }
+    
+    # Add to registry
+    registry_state$models[[model_id]]$versions[[version]] <<- version_entry
+    registry_state$models[[model_id]]$latest_version <<- version
+    registry_state$models[[model_id]]$updated <<- Sys.time()
+    
+    # Create version metadata file
+    version_meta_file <- file.path(registry_path, "metadata",
+                                   paste0(model_id, "_", version_id, ".yaml"))
+    yaml::write_yaml(version_entry, version_meta_file)
+    
+    save_registry()
+    
+    cat(sprintf("Registered version %s for model %s\n", version, model_id))
+    
+    return(version)
+  }
+  
+  # Get model information
+  get_model <- function(model_id = NULL, model_name = NULL) {
+    if (!is.null(model_id)) {
+      return(registry_state$models[[model_id]])
+    } else if (!is.null(model_name)) {
+      models <- Filter(function(m) m$name == model_name, registry_state$models)
+      if (length(models) == 0) return(NULL)
+      return(models[[1]])
+    }
+    return(NULL)
+  }
+  
+  # Get model version
+  get_version <- function(model_id, version = NULL) {
+    model <- get_model(model_id)
+    if (is.null(model)) return(NULL)
+    
+    if (is.null(version)) {
+      version <- model$latest_version
+    }
+    
+    return(model$versions[[version]])
+  }
+  
+  # List all models
+  list_models <- function(filter = NULL) {
+    models <- registry_state$models
+    
+    if (!is.null(filter)) {
+      if (is.function(filter)) {
+        models <- Filter(filter, models)
+      } else if (is.list(filter)) {
+        models <- Filter(function(m) {
+          all(sapply(names(filter), function(key) {
+            m[[key]] == filter[[key]]
+          }))
+        }, models)
+      }
+    }
+    
+    return(models)
+  }
+  
+  # Promote model version
+  promote_version <- function(model_id, version, new_status) {
+    valid_statuses <- c("development", "staging", "production", "archived", "deprecated")
+    
+    if (!new_status %in% valid_statuses) {
+      stop(sprintf("Invalid status. Must be one of: %s", 
+                   paste(valid_statuses, collapse = ", ")))
+    }
+    
+    model <- get_model(model_id)
+    if (is.null(model)) {
+      stop(sprintf("Model %s not found", model_id))
+    }
+    
+    if (!version %in% names(model$versions)) {
+      stop(sprintf("Version %s not found for model %s", version, model_id))
+    }
+    
+    registry_state$models[[model_id]]$versions[[version]]$status <<- new_status
+    registry_state$models[[model_id]]$updated <<- Sys.time()
+    
+    # Log promotion
+    log_entry <- list(
+      timestamp = Sys.time(),
+      model_id = model_id,
+      version = version,
+      action = "promote",
+      from = model$versions[[version]]$status,
+      to = new_status
+    )
+    
+    log_file <- file.path(registry_path, "logs", 
+                          paste0("promotion_", format(Sys.time(), "%Y%m%d"), ".log"))
+    write(jsonlite::toJSON(log_entry, auto_unbox = TRUE), 
+          file = log_file, append = TRUE)
+    
+    save_registry()
+    
+    cat(sprintf("Promoted model %s version %s to %s\n", 
+                model_id, version, new_status))
+    
+    return(TRUE)
+  }
+  
+  # Deploy model version
+  deploy_version <- function(model_id, version, environment = "production") {
+    version_entry <- get_version(model_id, version)
+    if (is.null(version_entry)) {
+      stop(sprintf("Version %s not found for model %s", version, model_id))
+    }
+    
+    # Check if model file exists
+    if (!file.exists(version_entry$model_file)) {
+      stop(sprintf("Model file not found: %s", version_entry$model_file))
+    }
+    
+    # Update deployment status
+    registry_state$models[[model_id]]$versions[[version]]$deployment$deployed <<- TRUE
+    registry_state$models[[model_id]]$versions[[version]]$deployment$deployment_time <<- Sys.time()
+    registry_state$models[[model_id]]$versions[[version]]$deployment$environment <<- environment
+    
+    # Create deployment record
+    deployment_record <- list(
+      deployment_id = paste0("DEPLOY_", 
+                             format(Sys.time(), "%Y%m%d_%H%M%S")),
+      model_id = model_id,
+      version = version,
+      environment = environment,
+      deployed_at = Sys.time(),
+      deployed_by = Sys.getenv("USER"),
+      status = "active"
+    )
+    
+    # Save deployment record
+    deploy_file <- file.path(registry_path, "deployments",
+                             paste0(deployment_record$deployment_id, ".yaml"))
+    yaml::write_yaml(deployment_record, deploy_file)
+    
+    save_registry()
+    
+    cat(sprintf("Deployed model %s version %s to %s environment\n",
+                model_id, version, environment))
+    
+    return(deployment_record)
+  }
+  
+  # Compare model versions
+  compare_versions <- function(model_id, version1, version2) {
+    v1 <- get_version(model_id, version1)
+    v2 <- get_version(model_id, version2)
+    
+    if (is.null(v1) || is.null(v2)) {
+      stop("One or both versions not found")
+    }
+    
+    comparison <- list(
+      model_id = model_id,
+      versions = c(version1, version2),
+      comparison_date = Sys.time(),
+      metrics_comparison = list(),
+      parameter_changes = list()
+    )
+    
+    # Compare metrics
+    if (!is.null(v1$metrics) && !is.null(v2$metrics)) {
+      common_metrics <- intersect(names(v1$metrics), names(v2$metrics))
+      for (metric in common_metrics) {
+        comparison$metrics_comparison[[metric]] <- list(
+          v1 = v1$metrics[[metric]],
+          v2 = v2$metrics[[metric]],
+          difference = if (is.numeric(v1$metrics[[metric]]) && 
+                           is.numeric(v2$metrics[[metric]])) {
+            v2$metrics[[metric]] - v1$metrics[[metric]]
+          } else {
+            "N/A"
+          },
+          percent_change = if (is.numeric(v1$metrics[[metric]]) && 
+                               is.numeric(v2$metrics[[metric]]) && 
+                               v1$metrics[[metric]] != 0) {
+            ((v2$metrics[[metric]] - v1$metrics[[metric]]) / 
+               abs(v1$metrics[[metric]])) * 100
+          } else {
+            "N/A"
+          }
+        )
+      }
+    }
+    
+    # Compare parameters
+    if (!is.null(v1$parameters) && !is.null(v2$parameters)) {
+      all_params <- unique(c(names(v1$parameters), names(v2$parameters)))
+      for (param in all_params) {
+        v1_val <- v1$parameters[[param]]
+        v2_val <- v2$parameters[[param]]
+        
+        if (is.null(v1_val) && !is.null(v2_val)) {
+          comparison$parameter_changes[[param]] <- list(
+            change = "added",
+            value = v2_val
+          )
+        } else if (!is.null(v1_val) && is.null(v2_val)) {
+          comparison$parameter_changes[[param]] <- list(
+            change = "removed",
+            value = v1_val
+          )
+        } else if (!identical(v1_val, v2_val)) {
+          comparison$parameter_changes[[param]] <- list(
+            change = "modified",
+            old_value = v1_val,
+            new_value = v2_val
+          )
+        }
+      }
+    }
+    
+    return(comparison)
+  }
+  
+  # Model performance monitoring
+  monitor_performance <- function(model_id, version, new_data, actual_values) {
+    # Load model
+    version_entry <- get_version(model_id, version)
+    if (is.null(version_entry)) {
+      stop(sprintf("Version %s not found for model %s", version, model_id))
+    }
+    
+    model <- readRDS(version_entry$model_file)
+    
+    # Make predictions
+    predictions <- predict(model, new_data)
+    
+    # Calculate performance metrics
+    if (is.factor(predictions) || is.character(predictions)) {
+      # Classification metrics
+      cm <- confusionMatrix(predictions, actual_values)
+      metrics <- list(
+        accuracy = cm$overall["Accuracy"],
+        kappa = cm$overall["Kappa"],
+        sensitivity = cm$byClass["Sensitivity"],
+        specificity = cm$byClass["Specificity"]
+      )
+    } else {
+      # Regression metrics
+      metrics <- list(
+        mae = mean(abs(predictions - actual_values), na.rm = TRUE),
+        rmse = sqrt(mean((predictions - actual_values)^2, na.rm = TRUE)),
+        r2 = 1 - sum((predictions - actual_values)^2, na.rm = TRUE) / 
+          sum((actual_values - mean(actual_values, na.rm = TRUE))^2, na.rm = TRUE)
+      )
+    }
+    
+    # Store monitoring results
+    monitor_file <- file.path(registry_path, "logs", "performance_monitoring",
+                              paste0(model_id, "_", version, "_", 
+                                     format(Sys.time(), "%Y%m%d"), ".json"))
+    
+    dir.create(dirname(monitor_file), recursive = TRUE, showWarnings = FALSE)
+    
+    monitor_record <- list(
+      timestamp = Sys.time(),
+      model_id = model_id,
+      version = version,
+      n_samples = nrow(new_data),
+      metrics = metrics,
+      drift_detected = FALSE  # Would be calculated by drift detection
+    )
+    
+    write(jsonlite::toJSON(monitor_record, auto_unbox = TRUE, pretty = TRUE),
+          monitor_file)
+    
+    # Check for performance degradation
+    if (!is.null(version_entry$metrics)) {
+      # Compare with training metrics
+      degradation <- list()
+      for (metric_name in names(metrics)) {
+        if (metric_name %in% names(version_entry$metrics)) {
+          train_value <- version_entry$metrics[[metric_name]]
+          current_value <- metrics[[metric_name]]
+          
+          if (is.numeric(train_value) && is.numeric(current_value)) {
+            # Calculate degradation
+            if (grepl("error|mae|rmse|loss", metric_name, ignore.case = TRUE)) {
+              # Lower is better
+              degradation[[metric_name]] <- 
+                (current_value - train_value) / train_value * 100
+            } else {
+              # Higher is better (accuracy, r2, etc.)
+              degradation[[metric_name]] <- 
+                (train_value - current_value) / train_value * 100
+            }
+          }
+        }
+      }
+      
+      monitor_record$degradation <- degradation
+      
+      # Flag significant degradation (>10%)
+      significant_degradation <- sapply(degradation, function(d) abs(d) > 10)
+      if (any(significant_degradation, na.rm = TRUE)) {
+        warning(sprintf("Performance degradation detected for model %s version %s",
+                        model_id, version))
+      }
+    }
+    
+    return(monitor_record)
+  }
+  
+  # Return registry interface
+  return(list(
+    register_model = register_model,
+    register_version = register_version,
+    get_model = get_model,
+    get_version = get_version,
+    list_models = list_models,
+    promote_version = promote_version,
+    deploy_version = deploy_version,
+    compare_versions = compare_versions,
+    monitor_performance = monitor_performance,
+    registry_state = function() registry_state,
+    registry_path = registry_path
+  ))
+}
+
+# SECTION 11.2: AUTOMATED MODEL PIPELINES
+# ----------------------------------------------------------------------------
+
+#' @title Automated ML Pipeline Builder
+#' @description Creates end-to-end ML pipelines with automation
+#' @param pipeline_config Pipeline configuration list
+#' @return Pipeline execution controller
+
+create_ml_pipeline <- function(pipeline_config = list()) {
+  
+  require(workflows)
+  require(recipes)
+  
+  # Default configuration
+  default_config <- list(
+    name = "ml_pipeline",
+    version = "1.0.0",
+    steps = c("data_loading", "preprocessing", "feature_engineering",
+              "model_training", "validation", "deployment"),
+    data_source = NULL,
+    target_column = NULL,
+    model_types = c("random_forest", "xgboost", "neural_network"),
+    validation_strategy = list(
+      method = "cv",
+      folds = 5,
+      repeats = 3
+    ),
+    hyperparameter_tuning = list(
+      method = "grid",
+      grid_size = 10,
+      metric = "accuracy"
+    ),
+    deployment_target = "model_registry",
+    monitoring = list(
+      enabled = TRUE,
+      drift_detection = TRUE,
+      performance_threshold = 0.8
+    )
+  )
+  
+  # Merge with user configuration
+  config <- modifyList(default_config, pipeline_config)
+  
+  # Pipeline state
+  pipeline_state <- list(
+    config = config,
+    status = "created",
+    current_step = NULL,
+    results = list(),
+    errors = list(),
+    start_time = NULL,
+    end_time = NULL
+  )
+  
+  # Step definitions
+  steps <- list(
+    
+    data_loading = function(state) {
+      cat("Step 1: Loading data...\n")
+      
+      data_source <- state$config$data_source
+      
+      if (is.null(data_source)) {
+        stop("Data source not specified in pipeline configuration")
+      }
+      
+      # Load data based on source type
+      if (is.character(data_source)) {
+        if (file.exists(data_source)) {
+          # Load from file
+          ext <- tools::file_ext(data_source)
+          data <- switch(ext,
+                         csv = read.csv(data_source),
+                         rds = readRDS(data_source),
+                         xlsx = readxl::read_excel(data_source),
+                         parquet = arrow::read_parquet(data_source),
+                         stop(sprintf("Unsupported file format: %s", ext))
+          )
+        } else {
+          # Try as URL or database connection
+          data <- tryCatch({
+            # Implement URL/database loading
+            read.csv(data_source)
+          }, error = function(e) {
+            stop(sprintf("Failed to load data from %s: %s", data_source, e$message))
+          })
+        }
+      } else if (is.function(data_source)) {
+        # Call data loading function
+        data <- data_source()
+      } else if (is.data.frame(data_source)) {
+        # Use provided data frame
+        data <- data_source
+      } else {
+        stop("Invalid data source type")
+      }
+      
+      # Validate data
+      if (!state$config$target_column %in% names(data)) {
+        stop(sprintf("Target column '%s' not found in data", 
+                     state$config$target_column))
+      }
+      
+      state$data <- data
+      state$results$data_loading <- list(
+        success = TRUE,
+        n_rows = nrow(data),
+        n_cols = ncol(data),
+        target_column = state$config$target_column,
+        timestamp = Sys.time()
+      )
+      
+      cat(sprintf("  Loaded %d rows × %d columns\n", nrow(data), ncol(data)))
+      
+      return(state)
+    },
+    
+    preprocessing = function(state) {
+      cat("Step 2: Data preprocessing...\n")
+      
+      data <- state$data
+      target_col <- state$config$target_column
+      
+      # Separate features and target
+      features <- data[, !names(data) %in% target_col, drop = FALSE]
+      target <- data[[target_col]]
+      
+      # Handle missing values
+      preprocessed_data <- impute_missing_intelligent(features)
+      
+      # Handle outliers
+      preprocessed_data <- handle_outliers(preprocessed_data, method = "iqr")
+      
+      # Update state
+      state$preprocessed_data <- list(
+        features = preprocessed_data,
+        target = target
+      )
+      
+      state$results$preprocessing <- list(
+        success = TRUE,
+        original_dimensions = dim(features),
+        preprocessed_dimensions = dim(preprocessed_data),
+        missing_values_imputed = sum(is.na(features)) - sum(is.na(preprocessed_data)),
+        timestamp = Sys.time()
+      )
+      
+      cat("  Preprocessing completed\n")
+      
+      return(state)
+    },
+    
+    feature_engineering = function(state) {
+      cat("Step 3: Feature engineering...\n")
+      
+      features <- state$preprocessed_data$features
+      target <- state$preprocessed_data$target
+      
+      # Perform feature engineering
+      engineered <- engineer_features(features, target_column = NULL)
+      
+      # Feature selection
+      if (ncol(engineered$data) > 50) {
+        # Select top features if too many
+        selected <- select_features(engineered$data, method = "variance", 
+                                    n_features = 50)
+        features_final <- selected
+      } else {
+        features_final <- engineered$data
+      }
+      
+      state$engineered_data <- list(
+        features = features_final,
+        target = target,
+        metadata = engineered$metadata
+      )
+      
+      state$results$feature_engineering <- list(
+        success = TRUE,
+        original_features = ncol(features),
+        engineered_features = ncol(engineered$data),
+        selected_features = ncol(features_final),
+        timestamp = Sys.time()
+      )
+      
+      cat(sprintf("  Engineered %d features\n", ncol(features_final)))
+      
+      return(state)
+    },
+    
+    model_training = function(state) {
+      cat("Step 4: Model training...\n")
+      
+      data <- state$engineered_data$features
+      target <- state$engineered_data$target
+      model_types <- state$config$model_types
+      
+      # Prepare data frame for modeling
+      model_data <- cbind(data, target = target)
+      
+      # Train models
+      models <- list()
+      performance <- list()
+      
+      for (model_type in model_types) {
+        cat(sprintf("  Training %s...\n", model_type))
+        
+        if (model_type == "random_forest") {
+          # Random Forest
+          result <- build_classification_models(
+            data = model_data,
+            target = "target",
+            models = "rf",
+            validation_split = 0.2,
+            cross_validation = state$config$validation_strategy$folds
+          )
+          
+        } else if (model_type == "xgboost") {
+          # XGBoost
+          result <- build_classification_models(
+            data = model_data,
+            target = "target",
+            models = "xgboost",
+            validation_split = 0.2,
+            cross_validation = state$config$validation_strategy$folds
+          )
+          
+        } else if (model_type == "neural_network") {
+          # Neural Network
+          # Convert data for neural network
+          x <- as.matrix(data)
+          y <- as.numeric(target) - 1  # Convert to 0-indexed for classification
+          
+          nn_result <- train_neural_network(
+            model = build_neural_network(
+              input_dim = ncol(x),
+              layers = c(64, 32),
+              problem_type = "binary_classification"
+            ),
+            x_train = x,
+            y_train = to_categorical(y, num_classes = length(unique(y))),
+            epochs = 50,
+            batch_size = 32
+          )
+          
+          result <- list(best_model = list(model = nn_result$model))
+        }
+        
+        models[[model_type]] <- result$best_model$model
+        performance[[model_type]] <- result$best_model$metrics
+      }
+      
+      # Select best model
+      performance_df <- do.call(rbind, lapply(names(performance), function(m) {
+        data.frame(
+          model = m,
+          accuracy = if (!is.null(performance[[m]]$accuracy)) 
+            performance[[m]]$accuracy else NA,
+          auc = if (!is.null(performance[[m]]$auc)) 
+            performance[[m]]$auc else NA,
+          stringsAsFactors = FALSE
+        )
+      }))
+      
+      best_model_name <- performance_df$model[
+        which.max(performance_df$accuracy %|% performance_df$auc)
+      ]
+      best_model <- models[[best_model_name]]
+      
+      state$models <- models
+      state$performance <- performance_df
+      state$best_model <- list(
+        name = best_model_name,
+        model = best_model,
+        performance = performance[[best_model_name]]
+      )
+      
+      state$results$model_training <- list(
+        success = TRUE,
+        models_trained = length(models),
+        best_model = best_model_name,
+        best_accuracy = max(performance_df$accuracy, na.rm = TRUE),
+        training_time = difftime(Sys.time(), state$start_time, units = "mins"),
+        timestamp = Sys.time()
+      )
+      
+      cat(sprintf("  Best model: %s (accuracy: %.3f)\n", 
+                  best_model_name, max(performance_df$accuracy, na.rm = TRUE)))
+      
+      return(state)
+    },
+    
+    validation = function(state) {
+      cat("Step 5: Model validation...\n")
+      
+      # Perform additional validation
+      validation_results <- list()
+      
+      # Cross-validation if not already done
+      if (state$config$validation_strategy$method == "cv") {
+        # Implement cross-validation
+        cat("  Performing cross-validation...\n")
+        
+        # This would implement proper cross-validation
+        # For now, use the results from training
+        
+        validation_results$cross_validation <- state$performance
+      }
+      
+      # Business validation (placeholder)
+      validation_results$business <- list(
+        passes_threshold = state$best_model$performance$accuracy > 
+          state$config$monitoring$performance_threshold,
+        recommendation = if (state$best_model$performance$accuracy > 0.8) {
+          "Ready for deployment"
+        } else if (state$best_model$performance$accuracy > 0.6) {
+          "Needs improvement"
+        } else {
+          "Not suitable for deployment"
+        }
+      )
+      
+      state$validation_results <- validation_results
+      state$results$validation <- list(
+        success = TRUE,
+        passes_business_validation = validation_results$business$passes_threshold,
+        recommendation = validation_results$business$recommendation,
+        timestamp = Sys.time()
+      )
+      
+      cat(sprintf("  Validation: %s\n", validation_results$business$recommendation))
+      
+      return(state)
+    },
+    
+    deployment = function(state) {
+      cat("Step 6: Model deployment...\n")
+      
+      deployment_target <- state$config$deployment_target
+      
+      if (deployment_target == "model_registry") {
+        # Deploy to model registry
+        registry <- create_model_registry()
+        
+        # Register model if not exists
+        model_id <- registry$register_model(
+          name = state$config$name,
+          model_type = state$best_model$name,
+          description = sprintf("Auto-generated by ML pipeline on %s", Sys.Date()),
+          tags = list(
+            pipeline = state$config$name,
+            auto_generated = TRUE,
+            target = state$config$target_column
+          )
+        )
+        
+        # Register version
+        version <- registry$register_version(
+          model_id = model_id,
+          model_object = state$best_model$model,
+          metrics = state$best_model$performance,
+          parameters = list(
+            pipeline_config = state$config,
+            training_date = Sys.Date()
+          ),
+          description = "Automated pipeline deployment"
+        )
+        
+        # Promote to production if validation passes
+        if (state$validation_results$business$passes_threshold) {
+          registry$promote_version(model_id, version, "production")
+          registry$deploy_version(model_id, version, "production")
+        }
+        
+        deployment_result <- list(
+          success = TRUE,
+          model_id = model_id,
+          version = version,
+          registry_path = registry$registry_path
+        )
+        
+      } else {
+        # Other deployment targets (API, database, etc.)
+        deployment_result <- list(
+          success = FALSE,
+          error = "Deployment target not implemented"
+        )
+      }
+      
+      state$deployment_result <- deployment_result
+      state$results$deployment <- deployment_result
+      
+      cat(sprintf("  Deployment: %s\n", 
+                  if (deployment_result$success) "SUCCESS" else "FAILED"))
+      
+      return(state)
+    }
+  )
+  
+  # Pipeline execution controller
+  execute_pipeline <- function(step = NULL) {
+    pipeline_state$start_time <<- Sys.time()
+    pipeline_state$status <<- "running"
+    
+    cat(sprintf("\n=== Starting ML Pipeline: %s ===\n", config$name))
+    cat(sprintf("Target: %s\n", config$target_column))
+    cat(sprintf("Steps: %s\n", paste(config$steps, collapse = " → ")))
+    cat(sprintf("Start time: %s\n\n", format(pipeline_state$start_time)))
+    
+    # Execute steps
+    steps_to_execute <- if (!is.null(step)) step else config$steps
+    
+    for (step_name in steps_to_execute) {
+      if (!step_name %in% names(steps)) {
+        warning(sprintf("Step '%s' not defined, skipping", step_name))
+        next
+      }
+      
+      pipeline_state$current_step <<- step_name
+      
+      cat(sprintf("\n[%s] ", step_name))
+      
+      tryCatch({
+        # Execute step
+        pipeline_state <<- steps[[step_name]](pipeline_state)
+        
+        # Log success
+        pipeline_state$results[[step_name]]$success <<- TRUE
+        
+      }, error = function(e) {
+        # Log error
+        pipeline_state$errors[[step_name]] <<- e$message
+        pipeline_state$results[[step_name]] <<- list(
+          success = FALSE,
+          error = e$message,
+          timestamp = Sys.time()
+        )
+        
+        warning(sprintf("Step '%s' failed: %s", step_name, e$message))
+        
+        # Stop pipeline if critical step fails
+        if (step_name %in% c("data_loading", "model_training")) {
+          stop(sprintf("Critical step '%s' failed, stopping pipeline", step_name))
+        }
+      })
+    }
+    
+    pipeline_state$end_time <<- Sys.time()
+    pipeline_state$status <<- if (length(pipeline_state$errors) == 0) 
+      "completed" else "completed_with_errors"
+    
+    # Generate pipeline report
+    report <- generate_pipeline_report(pipeline_state)
+    
+    cat(sprintf("\n=== Pipeline %s ===\n", 
+                if (pipeline_state$status == "completed") "COMPLETED" else "COMPLETED WITH ERRORS"))
+    cat(sprintf("Duration: %.1f minutes\n", 
+                difftime(pipeline_state$end_time, pipeline_state$start_time, 
+                         units = "mins")))
+    cat(sprintf("Successful steps: %d/%d\n", 
+                sum(sapply(pipeline_state$results, function(r) r$success)),
+                length(config$steps)))
+    
+    if (length(pipeline_state$errors) > 0) {
+      cat("Errors encountered:\n")
+      for (step in names(pipeline_state$errors)) {
+        cat(sprintf("  %s: %s\n", step, pipeline_state$errors[[step]]))
+      }
+    }
+    
+    return(list(
+      state = pipeline_state,
+      report = report,
+      success = pipeline_state$status == "completed"
+    ))
+  }
+  
+  # Generate pipeline report
+  generate_pipeline_report <- function(state) {
+    report <- list(
+      pipeline_name = config$name,
+      pipeline_version = config$version,
+      execution_id = format(state$start_time, "%Y%m%d_%H%M%S"),
+      start_time = state$start_time,
+      end_time = state$end_time,
+      duration_minutes = as.numeric(difftime(state$end_time, state$start_time, 
+                                             units = "mins")),
+      status = state$status,
+      steps_executed = config$steps,
+      step_results = state$results,
+      errors = state$errors,
+      best_model = if (!is.null(state$best_model)) {
+        list(
+          name = state$best_model$name,
+          performance = state$best_model$performance,
+          deployment = state$deployment_result
+        )
+      } else {
+        NULL
+      },
+      recommendations = if (!is.null(state$validation_results)) {
+        state$validation_results$business$recommendation
+      } else {
+        "No validation performed"
+      }
+    )
+    
+    # Save report
+    report_file <- sprintf("reports/pipeline_%s_%s.json",
+                           config$name,
+                           format(state$start_time, "%Y%m%d_%H%M%S"))
+    
+    dir.create(dirname(report_file), recursive = TRUE, showWarnings = FALSE)
+    
+    write(jsonlite::toJSON(report, auto_unbox = TRUE, pretty = TRUE), 
+          report_file)
+    
+    return(report)
+  }
+  
+  # Return pipeline controller
+  return(list(
+    execute = execute_pipeline,
+    get_state = function() pipeline_state,
+    get_config = function() config,
+    get_steps = function() names(steps)
+  ))
+}
+

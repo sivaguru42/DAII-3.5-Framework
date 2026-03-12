@@ -1,0 +1,38 @@
+daii_fields:
+  ticker:
+    expected: Ticker
+    alternatives: Symbol
+  rd_expense:
+    expected: R.D.Exp
+    alternatives: R&D Exp
+  market_cap:
+    expected: Mkt.Cap
+    alternatives: Mkt Cap
+  analyst_rating:
+    expected: BEst.Analyst.Rtg
+    alternatives: BEst Analyst Rtg
+  patent_count:
+    expected: Patents...Trademarks...Copy.Rgt
+    alternatives: Patents / Trademarks / Copy Rgt
+  news_sentiment:
+    expected: News.Sent
+    alternatives: News Sent
+  revenue_growth:
+    expected: Rev...1.Yr.Gr
+    alternatives: Rev - 1 Yr Gr
+  industry:
+    expected: GICS.Ind.Grp.Name
+    alternatives:
+    - GICS Ind Grp Name
+    - Industry
+  fund_name:
+    expected: fund_name
+    alternatives:
+    - fund_name
+    - Fund Name
+  fund_weight:
+    expected: fund_weight
+    alternatives:
+    - fund_weight
+    - Weight
+

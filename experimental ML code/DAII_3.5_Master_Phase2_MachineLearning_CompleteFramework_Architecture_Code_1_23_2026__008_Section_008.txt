@@ -1,0 +1,484 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 8 of 14
+# Title: Section_008
+# Lines: 4659 - 5134 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 7.1: STATISTICAL ANOMALY DETECTION
+# ----------------------------------------------------------------------------
+
+#' @title Statistical Anomaly Detection
+#' @description Detects anomalies using statistical methods
+#' @param data Input data
+#' @param method Detection method: "zscore", "iqr", "mahalanobis", "isolation_forest"
+#' @param threshold Anomaly threshold
+#' @param contamination Expected contamination rate
+#' @return Anomaly detection results
+
+detect_anomalies_statistical <- function(data, method = "zscore", 
+                                         threshold = 3, contamination = 0.1) {
+  
+  require(isotree)
+  require(anomalize)
+  
+  detection_results <- list(
+    method = method,
+    threshold = threshold,
+    contamination = contamination,
+    timestamp = Sys.time()
+  )
+  
+  # Ensure data is numeric matrix
+  if (is.data.frame(data)) {
+    data_matrix <- as.matrix(data[, sapply(data, is.numeric), drop = FALSE])
+  } else {
+    data_matrix <- as.matrix(data)
+  }
+  
+  # Remove any NA values
+  complete_cases <- complete.cases(data_matrix)
+  data_matrix <- data_matrix[complete_cases, , drop = FALSE]
+  
+  anomaly_scores <- numeric(nrow(data_matrix))
+  anomalies <- logical(nrow(data_matrix))
+  
+  if (method == "zscore") {
+    # Z-score method
+    z_scores <- scale(data_matrix)
+    anomaly_scores <- apply(abs(z_scores), 1, max)
+    anomalies <- anomaly_scores > threshold
+    
+    detection_results$z_scores <- z_scores
+    detection_results$mean <- attr(z_scores, "scaled:center")
+    detection_results$sd <- attr(z_scores, "scaled:scale")
+    
+  } else if (method == "iqr") {
+    # IQR method for each column
+    column_anomalies <- matrix(FALSE, nrow = nrow(data_matrix), 
+                               ncol = ncol(data_matrix))
+    
+    for (i in 1:ncol(data_matrix)) {
+      col_data <- data_matrix[, i]
+      q1 <- quantile(col_data, 0.25, na.rm = TRUE)
+      q3 <- quantile(col_data, 0.75, na.rm = TRUE)
+      iqr_val <- q3 - q1
+      
+      lower_bound <- q1 - threshold * iqr_val
+      upper_bound <- q3 + threshold * iqr_val
+      
+      column_anomalies[, i] <- col_data < lower_bound | col_data > upper_bound
+      
+      # Update anomaly scores
+      anomaly_scores <- pmax(anomaly_scores, 
+                             ifelse(col_data < lower_bound, 
+                                    (lower_bound - col_data) / iqr_val,
+                                    ifelse(col_data > upper_bound,
+                                           (col_data - upper_bound) / iqr_val, 0)))
+    }
+    
+    anomalies <- apply(column_anomalies, 1, any)
+    
+    detection_results$column_bounds <- list(
+      lower = apply(data_matrix, 2, function(x) quantile(x, 0.25) - threshold * IQR(x)),
+      upper = apply(data_matrix, 2, function(x) quantile(x, 0.75) + threshold * IQR(x))
+    )
+    
+  } else if (method == "mahalanobis") {
+    # Mahalanobis distance
+    if (ncol(data_matrix) > 1) {
+      cov_matrix <- cov(data_matrix)
+      center <- colMeans(data_matrix)
+      
+      # Calculate Mahalanobis distance
+      mahalanobis_dist <- mahalanobis(data_matrix, center, cov_matrix)
+      anomaly_scores <- mahalanobis_dist
+      
+      # Threshold based on chi-square distribution
+      chi_threshold <- qchisq(1 - contamination, df = ncol(data_matrix))
+      anomalies <- mahalanobis_dist > chi_threshold
+      
+      detection_results$cov_matrix <- cov_matrix
+      detection_results$center <- center
+      detection_results$chi_threshold <- chi_threshold
+    } else {
+      warning("Mahalanobis requires at least 2 dimensions, using z-score instead")
+      return(detect_anomalies_statistical(data, method = "zscore", 
+                                          threshold = threshold, 
+                                          contamination = contamination))
+    }
+    
+  } else if (method == "isolation_forest") {
+    # Isolation Forest
+    iso_forest <- isolation.forest(data_matrix, 
+                                   ndim = min(3, ncol(data_matrix)),
+                                   ntrees = 100,
+                                   nthreads = 1)
+    
+    anomaly_scores <- predict(iso_forest, data_matrix)
+    threshold_value <- quantile(anomaly_scores, 1 - contamination)
+    anomalies <- anomaly_scores > threshold_value
+    
+    detection_results$model <- iso_forest
+    detection_results$threshold_value <- threshold_value
+  }
+  
+  # Calculate summary statistics
+  detection_results$summary <- list(
+    total_points = nrow(data_matrix),
+    anomaly_count = sum(anomalies),
+    anomaly_percentage = mean(anomalies) * 100,
+    anomaly_scores_summary = summary(anomaly_scores)
+  )
+  
+  # Create anomaly indices
+  detection_results$anomaly_indices <- which(anomalies)
+  detection_results$anomaly_scores <- anomaly_scores
+  detection_results$anomaly_labels <- anomalies
+  
+  # Print summary
+  cat("Anomaly Detection Results:\n")
+  cat("=========================\n")
+  cat(sprintf("Method: %s\n", method))
+  cat(sprintf("Total data points: %d\n", nrow(data_matrix)))
+  cat(sprintf("Anomalies detected: %d (%.2f%%)\n", 
+              sum(anomalies), mean(anomalies) * 100))
+  cat(sprintf("Threshold: %.4f\n", 
+              if (method == "isolation_forest") threshold_value else threshold))
+  
+  return(detection_results)
+}
+
+#' @title Time Series Anomaly Detection
+#' @description Detects anomalies in time series data
+#' @param time_series Time series data
+#' @param method Detection method: "stl", "twitter", "prophet", "lstm"
+#' @param frequency Time series frequency
+#' @param alpha Anomaly significance level
+#' @return Time series anomaly results
+
+detect_timeseries_anomalies <- function(time_series, method = "stl",
+                                        frequency = NULL, alpha = 0.05) {
+  
+  require(anomalize)
+  require(prophet)
+  
+  # Convert to time series if needed
+  if (!inherits(time_series, "ts") && !is.vector(time_series)) {
+    if (ncol(time_series) == 1) {
+      time_series <- as.vector(time_series[, 1])
+    } else {
+      stop("Time series data should be a vector or single column")
+    }
+  }
+  
+  # Determine frequency if not provided
+  if (is.null(frequency)) {
+    if (inherits(time_series, "ts")) {
+      frequency <- frequency(time_series)
+    } else {
+      # Auto-detect frequency
+      if (length(time_series) > 365) {
+        frequency <- 7  # Daily data with weekly seasonality
+      } else if (length(time_series) > 100) {
+        frequency <- 12  # Monthly data
+      } else {
+        frequency <- 1  # No seasonality
+      }
+    }
+  }
+  
+  # Create time index
+  if (inherits(time_series, "ts")) {
+    time_index <- time(time_series)
+    values <- as.numeric(time_series)
+  } else {
+    time_index <- 1:length(time_series)
+    values <- time_series
+  }
+  
+  anomaly_results <- list(
+    method = method,
+    frequency = frequency,
+    alpha = alpha,
+    timestamp = Sys.time()
+  )
+  
+  if (method == "stl") {
+    # STL decomposition method
+    if (frequency > 1) {
+      ts_data <- ts(values, frequency = frequency)
+      
+      # STL decomposition
+      stl_decomp <- stl(ts_data, s.window = "periodic", robust = TRUE)
+      
+      # Extract components
+      seasonal <- stl_decomp$time.series[, "seasonal"]
+      trend <- stl_decomp$time.series[, "trend"]
+      remainder <- stl_decomp$time.series[, "remainder"]
+      
+      # Detect anomalies in remainder
+      remainder_mean <- mean(remainder, na.rm = TRUE)
+      remainder_sd <- sd(remainder, na.rm = TRUE)
+      
+      z_scores <- (remainder - remainder_mean) / remainder_sd
+      anomaly_scores <- abs(z_scores)
+      
+      # Threshold based on alpha
+      threshold <- qnorm(1 - alpha/2)
+      anomalies <- anomaly_scores > threshold
+      
+      anomaly_results$components <- list(
+        seasonal = seasonal,
+        trend = trend,
+        remainder = remainder
+      )
+      anomaly_results$remainder_stats <- c(mean = remainder_mean, sd = remainder_sd)
+      
+    } else {
+      warning("STL requires seasonal data, using IQR method instead")
+      method <- "iqr"
+    }
+    
+  } else if (method == "twitter") {
+    # Twitter's anomaly detection method
+    require(AnomalyDetection)
+    
+    # Prepare data frame for Twitter package
+    if (inherits(time_series, "ts")) {
+      dates <- seq.Date(from = Sys.Date() - length(time_series) + 1,
+                        by = ifelse(frequency == 12, "month", 
+                                    ifelse(frequency == 7, "day", "quarter")),
+                        length.out = length(time_series))
+    } else {
+      dates <- seq.Date(from = Sys.Date() - length(time_series) + 1,
+                        by = "day", length.out = length(time_series))
+    }
+    
+    twitter_data <- data.frame(
+      timestamp = dates,
+      count = values
+    )
+    
+    # Detect anomalies
+    twitter_anomalies <- AnomalyDetectionTs(twitter_data, 
+                                            max_anoms = alpha,
+                                            direction = "both",
+                                            plot = FALSE)
+    
+    anomalies <- rep(FALSE, length(values))
+    if (nrow(twitter_anomalies$anoms) > 0) {
+      anomaly_indices <- match(twitter_anomalies$anoms$timestamp, dates)
+      anomalies[anomaly_indices] <- TRUE
+    }
+    
+    anomaly_scores <- rep(0, length(values))
+    
+    anomaly_results$twitter_result <- twitter_anomalies
+    
+  } else if (method == "prophet") {
+    # Facebook Prophet for anomaly detection
+    prophet_data <- data.frame(
+      ds = seq.Date(from = Sys.Date() - length(values) + 1,
+                    by = "day", length.out = length(values)),
+      y = values
+    )
+    
+    prophet_model <- prophet(prophet_data, 
+                             yearly.seasonality = (frequency == 12),
+                             weekly.seasonality = (frequency == 7),
+                             daily.seasonality = FALSE)
+    
+    forecast <- predict(prophet_model, prophet_data)
+    
+    # Calculate residuals
+    residuals <- values - forecast$yhat
+    residual_sd <- sd(residuals, na.rm = TRUE)
+    
+    # Detect anomalies
+    anomaly_scores <- abs(residuals) / residual_sd
+    threshold <- qnorm(1 - alpha/2)
+    anomalies <- anomaly_scores > threshold
+    
+    anomaly_results$prophet_model <- prophet_model
+    anomaly_results$forecast <- forecast
+    anomaly_results$residual_sd <- residual_sd
+    
+  } else if (method == "iqr") {
+    # Simple IQR method for time series
+    # First, detrend if there's a trend
+    trend <- predict(loess(values ~ time_index, span = 0.2))
+    detrended <- values - trend
+    
+    # Calculate IQR bounds
+    q1 <- quantile(detrended, 0.25, na.rm = TRUE)
+    q3 <- quantile(detrended, 0.75, na.rm = TRUE)
+    iqr_val <- q3 - q1
+    
+    lower_bound <- q1 - 1.5 * iqr_val
+    upper_bound <- q3 + 1.5 * iqr_val
+    
+    anomalies <- detrended < lower_bound | detrended > upper_bound
+    anomaly_scores <- ifelse(detrended < lower_bound, 
+                             (lower_bound - detrended) / iqr_val,
+                             ifelse(detrended > upper_bound,
+                                    (detrended - upper_bound) / iqr_val, 0))
+    
+    anomaly_results$trend <- trend
+    anomaly_results$detrended <- detrended
+    anomaly_results$bounds <- c(lower = lower_bound, upper = upper_bound, iqr = iqr_val)
+  }
+  
+  # Calculate summary
+  anomaly_results$summary <- list(
+    total_points = length(values),
+    anomaly_count = sum(anomalies, na.rm = TRUE),
+    anomaly_percentage = mean(anomalies, na.rm = TRUE) * 100,
+    time_index = time_index,
+    values = values,
+    anomaly_scores = anomaly_scores,
+    anomaly_labels = anomalies
+  )
+  
+  # Create visualization data
+  anomaly_results$plot_data <- data.frame(
+    time = time_index,
+    value = values,
+    anomaly = anomalies,
+    score = anomaly_scores
+  )
+  
+  cat("Time Series Anomaly Detection:\n")
+  cat("=============================\n")
+  cat(sprintf("Method: %s\n", method))
+  cat(sprintf("Time series length: %d\n", length(values)))
+  cat(sprintf("Frequency: %d\n", frequency))
+  cat(sprintf("Anomalies detected: %d (%.2f%%)\n", 
+              sum(anomalies), mean(anomalies) * 100))
+  
+  return(anomaly_results)
+}
+
+# SECTION 7.2: ENSEMBLE ANOMALY DETECTION
+# ----------------------------------------------------------------------------
+
+#' @title Ensemble Anomaly Detection
+#' @description Combines multiple anomaly detection methods
+#' @param data Input data
+#' @param methods List of methods to combine
+#' @param combination_method How to combine results: "voting", "average", "maximum"
+#' @param weights Optional weights for each method
+#' @return Ensemble anomaly detection results
+
+detect_anomalies_ensemble <- function(data, 
+                                      methods = c("zscore", "iqr", "isolation_forest"),
+                                      combination_method = "voting",
+                                      weights = NULL) {
+  
+  # Run individual detection methods
+  method_results <- list()
+  all_scores <- matrix(NA, nrow = nrow(data), ncol = length(methods))
+  all_labels <- matrix(FALSE, nrow = nrow(data), ncol = length(methods))
+  
+  for (i in seq_along(methods)) {
+    method <- methods[i]
+    cat(sprintf("Running %s detection...\n", method))
+    
+    result <- detect_anomalies_statistical(data, method = method)
+    
+    method_results[[method]] <- result
+    all_scores[, i] <- result$anomaly_scores
+    all_labels[, i] <- result$anomaly_labels
+  }
+  
+  # Combine results
+  if (combination_method == "voting") {
+    # Majority voting
+    if (is.null(weights)) {
+      votes <- rowSums(all_labels, na.rm = TRUE)
+      threshold <- ceiling(length(methods) / 2)
+      ensemble_labels <- votes >= threshold
+      ensemble_scores <- votes / length(methods)
+    } else {
+      # Weighted voting
+      weighted_votes <- all_labels %*% weights
+      threshold <- sum(weights) / 2
+      ensemble_labels <- weighted_votes >= threshold
+      ensemble_scores <- weighted_votes / sum(weights)
+    }
+    
+  } else if (combination_method == "average") {
+    # Average scores
+    ensemble_scores <- rowMeans(all_scores, na.rm = TRUE)
+    
+    # Normalize scores to [0, 1]
+    ensemble_scores <- (ensemble_scores - min(ensemble_scores, na.rm = TRUE)) / 
+      (max(ensemble_scores, na.rm = TRUE) - min(ensemble_scores, na.rm = TRUE))
+    
+    # Determine threshold (top 10% by default)
+    threshold <- quantile(ensemble_scores, 0.9, na.rm = TRUE)
+    ensemble_labels <- ensemble_scores > threshold
+    
+  } else if (combination_method == "maximum") {
+    # Maximum score
+    ensemble_scores <- apply(all_scores, 1, max, na.rm = TRUE)
+    
+    # Normalize scores
+    ensemble_scores <- (ensemble_scores - min(ensemble_scores, na.rm = TRUE)) / 
+      (max(ensemble_scores, na.rm = TRUE) - min(ensemble_scores, na.rm = TRUE))
+    
+    threshold <- quantile(ensemble_scores, 0.9, na.rm = TRUE)
+    ensemble_labels <- ensemble_scores > threshold
+  }
+  
+  # Calculate consensus metrics
+  consensus_matrix <- matrix(0, nrow = length(methods), ncol = length(methods))
+  for (i in 1:length(methods)) {
+    for (j in 1:length(methods)) {
+      if (i != j) {
+        agreement <- mean(all_labels[, i] == all_labels[, j], na.rm = TRUE)
+        consensus_matrix[i, j] <- agreement
+      }
+    }
+  }
+  
+  # Calculate method performance relative to ensemble
+  method_performance <- data.frame(
+    Method = methods,
+    Detected = colSums(all_labels, na.rm = TRUE),
+    Agreement_with_ensemble = colMeans(all_labels == ensemble_labels, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+  
+  ensemble_results <- list(
+    methods_used = methods,
+    combination_method = combination_method,
+    weights = weights,
+    individual_results = method_results,
+    ensemble_scores = ensemble_scores,
+    ensemble_labels = ensemble_labels,
+    consensus_matrix = consensus_matrix,
+    method_performance = method_performance,
+    summary = list(
+      total_points = nrow(data),
+      ensemble_anomalies = sum(ensemble_labels),
+      ensemble_percentage = mean(ensemble_labels) * 100,
+      method_agreement = mean(consensus_matrix[lower.tri(consensus_matrix)])
+    )
+  )
+  
+  cat("\nEnsemble Anomaly Detection Results:\n")
+  cat("==================================\n")
+  cat(sprintf("Methods combined: %s\n", paste(methods, collapse = ", ")))
+  cat(sprintf("Combination method: %s\n", combination_method))
+  cat(sprintf("Total anomalies detected: %d (%.2f%%)\n", 
+              sum(ensemble_labels), mean(ensemble_labels) * 100))
+  cat("\nMethod Performance:\n")
+  print(method_performance)
+  
+  return(ensemble_results)
+}
+

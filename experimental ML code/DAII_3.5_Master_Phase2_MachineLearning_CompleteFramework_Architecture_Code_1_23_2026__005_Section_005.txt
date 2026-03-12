@@ -1,0 +1,861 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 5 of 14
+# Title: Section_005
+# Lines: 2083 - 2935 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 4.1: HYPOTHESIS TESTING SUITE
+# ----------------------------------------------------------------------------
+
+#' @title Comprehensive Hypothesis Testing
+#' @description Performs appropriate statistical tests based on data characteristics
+#' @param data Input data frame
+#' @param variable Variable to test
+#' @param group_var Grouping variable for comparison tests
+#' @param test_type Specific test to perform (default: "auto")
+#' @param alternative Alternative hypothesis
+#' @return Test results with interpretation
+
+perform_hypothesis_test <- function(data, variable, group_var = NULL, 
+                                    test_type = "auto", alternative = "two.sided") {
+  
+  test_results <- list(
+    variable = variable,
+    group_var = group_var,
+    test_type = test_type,
+    timestamp = Sys.time()
+  )
+  
+  var_data <- data[[variable]]
+  
+  # Auto-detect test type
+  if (test_type == "auto") {
+    if (is.null(group_var)) {
+      # One-sample tests
+      if (is.numeric(var_data)) {
+        # Check normality
+        if (length(na.omit(var_data)) < 5000) {
+          normality_test <- shapiro.test(var_data)
+          if (normality_test$p.value > 0.05) {
+            test_type <- "t_test_one_sample"
+          } else {
+            test_type <- "wilcoxon_signed_rank"
+          }
+        } else {
+          test_type <- "z_test"  # Large sample
+        }
+      } else if (is.factor(var_data) || is.character(var_data)) {
+        test_type <- "chi_square_gof"
+      }
+    } else {
+      # Two-sample or multi-sample tests
+      group_data <- data[[group_var]]
+      
+      if (is.numeric(var_data)) {
+        # Check number of groups
+        n_groups <- length(unique(na.omit(group_data)))
+        
+        if (n_groups == 2) {
+          # Two-sample test
+          group1 <- var_data[group_data == unique(group_data)[1]]
+          group2 <- var_data[group_data == unique(group_data)[2]]
+          
+          # Check normality and equal variance
+          if (length(na.omit(group1)) < 5000 && length(na.omit(group2)) < 5000) {
+            norm1 <- shapiro.test(group1)$p.value > 0.05
+            norm2 <- shapiro.test(group2)$p.value > 0.05
+            var_test <- var.test(group1, group2)$p.value > 0.05
+            
+            if (norm1 && norm2 && var_test) {
+              test_type <- "t_test_independent"
+            } else if (norm1 && norm2) {
+              test_type <- "welch_t_test"
+            } else {
+              test_type <- "mann_whitney"
+            }
+          } else {
+            test_type <- "z_test_two_sample"
+          }
+        } else if (n_groups > 2) {
+          # Multi-group test
+          test_type <- "anova"
+        }
+      } else if (is.factor(var_data) || is.character(var_data)) {
+        test_type <- "chi_square_independence"
+      }
+    }
+  }
+  
+  test_results$test_type <- test_type
+  
+  # Perform selected test
+  if (test_type == "t_test_one_sample") {
+    test <- t.test(var_data, mu = mean(var_data, na.rm = TRUE), 
+                   alternative = alternative)
+    test_results$test_name <- "One Sample t-test"
+    test_results$null_hypothesis <- paste0("Mean = ", mean(var_data, na.rm = TRUE))
+    
+  } else if (test_type == "wilcoxon_signed_rank") {
+    test <- wilcox.test(var_data, mu = median(var_data, na.rm = TRUE), 
+                        alternative = alternative, exact = FALSE)
+    test_results$test_name <- "Wilcoxon Signed-Rank Test"
+    test_results$null_hypothesis <- paste0("Median = ", median(var_data, na.rm = TRUE))
+    
+  } else if (test_type == "t_test_independent") {
+    groups <- split(var_data, data[[group_var]])
+    test <- t.test(groups[[1]], groups[[2]], 
+                   var.equal = TRUE, alternative = alternative)
+    test_results$test_name <- "Independent Samples t-test"
+    test_results$null_hypothesis <- "Means are equal"
+    
+  } else if (test_type == "welch_t_test") {
+    groups <- split(var_data, data[[group_var]])
+    test <- t.test(groups[[1]], groups[[2]], 
+                   var.equal = FALSE, alternative = alternative)
+    test_results$test_name <- "Welch's t-test"
+    test_results$null_hypothesis <- "Means are equal"
+    
+  } else if (test_type == "mann_whitney") {
+    groups <- split(var_data, data[[group_var]])
+    test <- wilcox.test(groups[[1]], groups[[2]], 
+                        alternative = alternative, exact = FALSE)
+    test_results$test_name <- "Mann-Whitney U Test"
+    test_results$null_hypothesis <- "Distributions are equal"
+    
+  } else if (test_type == "anova") {
+    formula <- as.formula(paste(variable, "~", group_var))
+    anova_model <- aov(formula, data = data)
+    test <- summary(anova_model)
+    test_results$test_name <- "One-way ANOVA"
+    test_results$null_hypothesis <- "All group means are equal"
+    
+    # Post-hoc test if ANOVA is significant
+    if (!is.na(test[[1]]["Pr(>F)"][1,]) && test[[1]]["Pr(>F)"][1,] < 0.05) {
+      test_results$posthoc <- TukeyHSD(anova_model)
+    }
+    
+  } else if (test_type == "chi_square_gof") {
+    observed <- table(var_data)
+    expected <- rep(sum(observed)/length(observed), length(observed))
+    test <- chisq.test(observed, p = expected/sum(expected))
+    test_results$test_name <- "Chi-square Goodness of Fit"
+    test_results$null_hypothesis <- "Observed frequencies match expected"
+    
+  } else if (test_type == "chi_square_independence") {
+    contingency_table <- table(data[[variable]], data[[group_var]])
+    test <- chisq.test(contingency_table)
+    test_results$test_name <- "Chi-square Test of Independence"
+    test_results$null_hypothesis <- "Variables are independent"
+  }
+  
+  # Store test results
+  test_results$test_statistic <- ifelse(exists("test"), 
+                                        ifelse(is.list(test), test$statistic, NA), 
+                                        NA)
+  test_results$p_value <- ifelse(exists("test"), 
+                                 ifelse(is.list(test), test$p.value, NA), 
+                                 NA)
+  test_results$confidence_interval <- ifelse(exists("test") && !is.null(test$conf.int),
+                                             test$conf.int, NA)
+  
+  # Add effect size
+  if (test_type %in% c("t_test_one_sample", "t_test_independent", "welch_t_test")) {
+    if (exists("test") && !is.na(test_results$test_statistic)) {
+      if (test_type == "t_test_one_sample") {
+        n <- length(na.omit(var_data))
+        test_results$effect_size <- test_results$test_statistic / sqrt(n)
+        test_results$effect_size_name <- "Cohen's d"
+      } else {
+        groups <- split(var_data, data[[group_var]])
+        n1 <- length(na.omit(groups[[1]]))
+        n2 <- length(na.omit(groups[[2]]))
+        pooled_sd <- sqrt(((n1-1)*var(groups[[1]], na.rm = TRUE) + 
+                             (n2-1)*var(groups[[2]], na.rm = TRUE)) / (n1+n2-2))
+        mean_diff <- mean(groups[[1]], na.rm = TRUE) - mean(groups[[2]], na.rm = TRUE)
+        test_results$effect_size <- mean_diff / pooled_sd
+        test_results$effect_size_name <- "Cohen's d"
+      }
+    }
+  } else if (test_type == "mann_whitney") {
+    if (exists("test")) {
+      n1 <- sum(!is.na(groups[[1]]))
+      n2 <- sum(!is.na(groups[[2]]))
+      test_results$effect_size <- (test$statistic / (n1 * n2)) - 0.5
+      test_results$effect_size_name <- "Rank-biserial correlation"
+    }
+  } else if (test_type == "anova") {
+    if (exists("anova_model")) {
+      ss_total <- sum(anova_model$residuals^2 + anova_model$fitted.values^2)
+      ss_residual <- sum(anova_model$residuals^2)
+      eta_squared <- 1 - (ss_residual / ss_total)
+      test_results$effect_size <- eta_squared
+      test_results$effect_size_name <- "Eta-squared"
+    }
+  } else if (test_type %in% c("chi_square_gof", "chi_square_independence")) {
+    if (exists("test")) {
+      n <- sum(contingency_table)
+      k <- min(dim(contingency_table))
+      phi <- sqrt(test$statistic / n)
+      test_results$effect_size <- phi
+      test_results$effect_size_name <- "Phi coefficient"
+    }
+  }
+  
+  # Add interpretation
+  if (!is.na(test_results$p_value)) {
+    if (test_results$p_value < 0.001) {
+      interpretation <- "Very strong evidence against null hypothesis"
+      significance <- "***"
+    } else if (test_results$p_value < 0.01) {
+      interpretation <- "Strong evidence against null hypothesis"
+      significance <- "**"
+    } else if (test_results$p_value < 0.05) {
+      interpretation <- "Moderate evidence against null hypothesis"
+      significance <- "*"
+    } else if (test_results$p_value < 0.1) {
+      interpretation <- "Weak evidence against null hypothesis"
+      significance <- "."
+    } else {
+      interpretation <- "Insufficient evidence against null hypothesis"
+      significance <- " "
+    }
+    
+    test_results$interpretation <- interpretation
+    test_results$significance <- significance
+  }
+  
+  # Print summary
+  cat("\nHypothesis Test Results:\n")
+  cat("========================\n")
+  cat(sprintf("Test: %s\n", test_results$test_name))
+  cat(sprintf("Variable: %s\n", variable))
+  if (!is.null(group_var)) cat(sprintf("Grouping: %s\n", group_var))
+  cat(sprintf("H0: %s\n", test_results$null_hypothesis))
+  if (!is.na(test_results$test_statistic)) {
+    cat(sprintf("Test Statistic: %.4f\n", test_results$test_statistic))
+  }
+  cat(sprintf("p-value: %.4f %s\n", test_results$p_value, test_results$significance))
+  if (!is.na(test_results$effect_size)) {
+    cat(sprintf("Effect Size (%s): %.4f\n", 
+                test_results$effect_size_name, test_results$effect_size))
+  }
+  cat(sprintf("Interpretation: %s\n", test_results$interpretation))
+  
+  return(test_results)
+}
+
+# SECTION 4.2: REGRESSION MODELING
+# ----------------------------------------------------------------------------
+
+#' @title Automated Regression Modeling
+#' @description Fits and evaluates multiple regression models
+#' @param data Input data frame
+#' @param formula Regression formula (or NULL for automatic)
+#' @param models Types of models to fit
+#' @param validation_split Validation split proportion
+#' @param cross_validation K-fold cross-validation
+#' @return Model comparison and best model
+
+build_regression_models <- function(data, formula = NULL, 
+                                    models = c("linear", "ridge", "lasso", "elastic", "rf", "xgboost"),
+                                    validation_split = 0.2, cross_validation = 10) {
+  
+  require(caret)
+  require(glmnet)
+  require(xgboost)
+  require(ranger)
+  
+  # Prepare data
+  if (is.null(formula)) {
+    # Auto-detect: last numeric column as target
+    numeric_cols <- names(data)[sapply(data, is.numeric)]
+    if (length(numeric_cols) < 2) {
+      stop("Need at least 2 numeric columns for regression")
+    }
+    target <- numeric_cols[length(numeric_cols)]
+    predictors <- setdiff(names(data), target)
+    formula <- as.formula(paste(target, "~ ."))
+  } else {
+    target <- all.vars(formula)[1]
+    predictors <- all.vars(formula)[-1]
+  }
+  
+  # Split data
+  set.seed(42)
+  train_index <- createDataPartition(data[[target]], p = 1 - validation_split, 
+                                     list = FALSE)
+  train_data <- data[train_index, ]
+  test_data <- data[-train_index, ]
+  
+  # Create control for training
+  ctrl <- trainControl(
+    method = "cv",
+    number = cross_validation,
+    verboseIter = FALSE,
+    savePredictions = "final"
+  )
+  
+  model_results <- list()
+  performance_comparison <- data.frame()
+  
+  # Linear Regression
+  if ("linear" %in% models) {
+    cat("Fitting Linear Regression...\n")
+    lm_model <- train(formula, 
+                      data = train_data,
+                      method = "lm",
+                      trControl = ctrl,
+                      preProcess = c("center", "scale"))
+    
+    lm_pred <- predict(lm_model, test_data)
+    lm_metrics <- calculate_regression_metrics(test_data[[target]], lm_pred)
+    
+    model_results$linear <- list(
+      model = lm_model,
+      predictions = lm_pred,
+      metrics = lm_metrics
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Linear Regression",
+                                               RMSE = lm_metrics$rmse,
+                                               MAE = lm_metrics$mae,
+                                               R2 = lm_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Ridge Regression
+  if ("ridge" %in% models) {
+    cat("Fitting Ridge Regression...\n")
+    ridge_grid <- expand.grid(alpha = 0, 
+                              lambda = 10^seq(-3, 3, length = 100))
+    
+    ridge_model <- train(formula,
+                         data = train_data,
+                         method = "glmnet",
+                         trControl = ctrl,
+                         tuneGrid = ridge_grid,
+                         preProcess = c("center", "scale"))
+    
+    ridge_pred <- predict(ridge_model, test_data)
+    ridge_metrics <- calculate_regression_metrics(test_data[[target]], ridge_pred)
+    
+    model_results$ridge <- list(
+      model = ridge_model,
+      predictions = ridge_pred,
+      metrics = ridge_metrics
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Ridge Regression",
+                                               RMSE = ridge_metrics$rmse,
+                                               MAE = ridge_metrics$mae,
+                                               R2 = ridge_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Lasso Regression
+  if ("lasso" %in% models) {
+    cat("Fitting Lasso Regression...\n")
+    lasso_grid <- expand.grid(alpha = 1,
+                              lambda = 10^seq(-3, 3, length = 100))
+    
+    lasso_model <- train(formula,
+                         data = train_data,
+                         method = "glmnet",
+                         trControl = ctrl,
+                         tuneGrid = lasso_grid,
+                         preProcess = c("center", "scale"))
+    
+    lasso_pred <- predict(lasso_model, test_data)
+    lasso_metrics <- calculate_regression_metrics(test_data[[target]], lasso_pred)
+    
+    model_results$lasso <- list(
+      model = lasso_model,
+      predictions = lasso_pred,
+      metrics = lasso_metrics
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Lasso Regression",
+                                               RMSE = lasso_metrics$rmse,
+                                               MAE = lasso_metrics$mae,
+                                               R2 = lasso_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Elastic Net
+  if ("elastic" %in% models) {
+    cat("Fitting Elastic Net...\n")
+    elastic_grid <- expand.grid(alpha = seq(0, 1, length = 10),
+                                lambda = 10^seq(-3, 3, length = 100))
+    
+    elastic_model <- train(formula,
+                           data = train_data,
+                           method = "glmnet",
+                           trControl = ctrl,
+                           tuneGrid = elastic_grid,
+                           preProcess = c("center", "scale"))
+    
+    elastic_pred <- predict(elastic_model, test_data)
+    elastic_metrics <- calculate_regression_metrics(test_data[[target]], elastic_pred)
+    
+    model_results$elastic <- list(
+      model = elastic_model,
+      predictions = elastic_pred,
+      metrics = elastic_metrics
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Elastic Net",
+                                               RMSE = elastic_metrics$rmse,
+                                               MAE = elastic_metrics$mae,
+                                               R2 = elastic_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Random Forest
+  if ("rf" %in% models) {
+    cat("Fitting Random Forest...\n")
+    rf_grid <- expand.grid(mtry = c(2, sqrt(length(predictors)), length(predictors)/2),
+                           splitrule = "variance",
+                           min.node.size = c(5, 10, 20))
+    
+    rf_model <- train(formula,
+                      data = train_data,
+                      method = "ranger",
+                      trControl = ctrl,
+                      tuneGrid = rf_grid,
+                      importance = "permutation",
+                      num.trees = 100)
+    
+    rf_pred <- predict(rf_model, test_data)
+    rf_metrics <- calculate_regression_metrics(test_data[[target]], rf_pred)
+    
+    model_results$rf <- list(
+      model = rf_model,
+      predictions = rf_pred,
+      metrics = rf_metrics,
+      importance = varImp(rf_model)$importance
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Random Forest",
+                                               RMSE = rf_metrics$rmse,
+                                               MAE = rf_metrics$mae,
+                                               R2 = rf_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # XGBoost
+  if ("xgboost" %in% models) {
+    cat("Fitting XGBoost...\n")
+    xgb_grid <- expand.grid(
+      nrounds = c(100, 200),
+      max_depth = c(3, 6, 9),
+      eta = c(0.01, 0.1, 0.3),
+      gamma = c(0, 1),
+      colsample_bytree = c(0.5, 0.8, 1),
+      min_child_weight = c(1, 3, 5),
+      subsample = c(0.5, 0.8, 1)
+    )
+    
+    xgb_model <- train(formula,
+                       data = train_data,
+                       method = "xgbTree",
+                       trControl = ctrl,
+                       tuneGrid = xgb_grid,
+                       verbosity = 0)
+    
+    xgb_pred <- predict(xgb_model, test_data)
+    xgb_metrics <- calculate_regression_metrics(test_data[[target]], xgb_pred)
+    
+    model_results$xgboost <- list(
+      model = xgb_model,
+      predictions = xgb_pred,
+      metrics = xgb_metrics,
+      importance = varImp(xgb_model)$importance
+    )
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "XGBoost",
+                                               RMSE = xgb_metrics$rmse,
+                                               MAE = xgb_metrics$mae,
+                                               R2 = xgb_metrics$r_squared,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Identify best model
+  performance_comparison <- performance_comparison %>%
+    arrange(RMSE)
+  
+  best_model_name <- performance_comparison$Model[1]
+  best_model <- model_results[[tolower(gsub(" ", "_", best_model_name))]]
+  
+  # Create comparison plot
+  comparison_plot <- ggplot(performance_comparison, aes(x = reorder(Model, -RMSE), y = RMSE)) +
+    geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+    geom_text(aes(label = round(RMSE, 3)), hjust = -0.2, size = 3) +
+    coord_flip() +
+    labs(title = "Model Performance Comparison",
+         x = "Model", y = "RMSE (Lower is Better)") +
+    theme_minimal()
+  
+  # Create residual plots for best model
+  residuals <- test_data[[target]] - best_model$predictions
+  
+  residual_plot <- ggplot(data.frame(Fitted = best_model$predictions, 
+                                     Residuals = residuals),
+                          aes(x = Fitted, y = Residuals)) +
+    geom_point(alpha = 0.5, color = "steelblue") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    geom_smooth(method = "loess", color = "darkgreen", se = FALSE) +
+    labs(title = paste("Residual Plot -", best_model_name),
+         x = "Fitted Values", y = "Residuals") +
+    theme_minimal()
+  
+  # QQ plot of residuals
+  qq_plot <- ggplot(data.frame(Residuals = residuals), aes(sample = Residuals)) +
+    stat_qq(color = "steelblue") +
+    stat_qq_line(color = "darkred") +
+    labs(title = paste("Q-Q Plot of Residuals -", best_model_name),
+         x = "Theoretical Quantiles", y = "Sample Quantiles") +
+    theme_minimal()
+  
+  results <- list(
+    models = model_results,
+    performance_comparison = performance_comparison,
+    best_model = list(
+      name = best_model_name,
+      model = best_model$model,
+      metrics = best_model$metrics,
+      predictions = best_model$predictions
+    ),
+    test_data = test_data,
+    plots = list(
+      comparison_plot = comparison_plot,
+      residual_plot = residual_plot,
+      qq_plot = qq_plot
+    ),
+    summary = list(
+      total_models = length(models),
+      best_model_rmse = performance_comparison$RMSE[1],
+      best_model_r2 = performance_comparison$R2[1],
+      validation_split = validation_split,
+      cross_validation_folds = cross_validation
+    )
+  )
+  
+  # Print summary
+  cat("\nRegression Modeling Summary:\n")
+  cat("============================\n")
+  cat(sprintf("Target variable: %s\n", target))
+  cat(sprintf("Number of predictors: %d\n", length(predictors)))
+  cat(sprintf("Training samples: %d\n", nrow(train_data)))
+  cat(sprintf("Testing samples: %d\n", nrow(test_data)))
+  cat(sprintf("Best model: %s\n", best_model_name))
+  cat(sprintf("Best RMSE: %.4f\n", performance_comparison$RMSE[1]))
+  cat(sprintf("Best R-squared: %.4f\n", performance_comparison$R2[1]))
+  
+  return(results)
+}
+
+#' @title Calculate Regression Metrics
+#' @description Helper function to calculate regression performance metrics
+#' @param actual Actual values
+#' @param predicted Predicted values
+#' @return List of metrics
+
+calculate_regression_metrics <- function(actual, predicted) {
+  # Remove NA values
+  complete_cases <- complete.cases(actual, predicted)
+  actual <- actual[complete_cases]
+  predicted <- predicted[complete_cases]
+  
+  # Calculate errors
+  errors <- actual - predicted
+  
+  # Calculate metrics
+  mae <- mean(abs(errors))
+  mse <- mean(errors^2)
+  rmse <- sqrt(mse)
+  mape <- mean(abs(errors / actual)) * 100
+  r_squared <- 1 - (sum(errors^2) / sum((actual - mean(actual))^2))
+  adjusted_r_squared <- 1 - ((1 - r_squared) * (length(actual) - 1) / 
+                               (length(actual) - length(coef) - 1))
+  
+  return(list(
+    mae = mae,
+    mse = mse,
+    rmse = rmse,
+    mape = mape,
+    r_squared = r_squared,
+    adjusted_r_squared = adjusted_r_squared
+  ))
+}
+
+# SECTION 4.3: TIME SERIES FORECASTING
+# ----------------------------------------------------------------------------
+
+#' @title Automated Time Series Forecasting
+#' @description Forecasts time series using multiple methods
+#' @param time_series Time series data
+#' @param horizon Forecast horizon
+#' @param models Models to use: "auto_arima", "ets", "tbats", "prophet", "neural"
+#' @param frequency Time series frequency
+#' @return Forecasts and model comparisons
+
+forecast_timeseries <- function(time_series, horizon = 12, 
+                                models = c("auto_arima", "ets", "tbats", "prophet"),
+                                frequency = NULL) {
+  
+  require(forecast)
+  require(prophet)
+  
+  # Determine frequency
+  if (is.null(frequency)) {
+    if (inherits(time_series, "ts")) {
+      frequency <- frequency(time_series)
+    } else {
+      # Auto-detect
+      if (length(time_series) > 365) {
+        frequency <- 7  # Daily data with weekly seasonality
+      } else if (length(time_series) > 100) {
+        frequency <- 12  # Monthly data
+      } else if (length(time_series) > 30) {
+        frequency <- 4  # Quarterly data
+      } else {
+        frequency <- 1  # No seasonality
+      }
+    }
+  }
+  
+  # Convert to time series
+  if (!inherits(time_series, "ts")) {
+    ts_data <- ts(time_series, frequency = frequency)
+  } else {
+    ts_data <- time_series
+  }
+  
+  # Split into train/test
+  train_size <- floor(length(ts_data) * 0.8)
+  train_ts <- window(ts_data, end = train_size)
+  test_ts <- window(ts_data, start = train_size + 1)
+  
+  forecast_results <- list()
+  accuracy_comparison <- data.frame()
+  
+  # Auto ARIMA
+  if ("auto_arima" %in% models) {
+    cat("Fitting Auto ARIMA...\n")
+    arima_model <- auto.arima(train_ts, 
+                              seasonal = (frequency > 1),
+                              stepwise = TRUE,
+                              approximation = length(train_ts) > 100)
+    
+    arima_forecast <- forecast(arima_model, h = horizon)
+    arima_accuracy <- accuracy(arima_forecast, test_ts)[2, ]  # Test accuracy
+    
+    forecast_results$auto_arima <- list(
+      model = arima_model,
+      forecast = arima_forecast,
+      accuracy = arima_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "Auto ARIMA",
+                                            RMSE = arima_accuracy["RMSE"],
+                                            MAE = arima_accuracy["MAE"],
+                                            MAPE = arima_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # ETS (Error, Trend, Seasonality)
+  if ("ets" %in% models) {
+    cat("Fitting ETS...\n")
+    ets_model <- ets(train_ts)
+    ets_forecast <- forecast(ets_model, h = horizon)
+    ets_accuracy <- accuracy(ets_forecast, test_ts)[2, ]
+    
+    forecast_results$ets <- list(
+      model = ets_model,
+      forecast = ets_forecast,
+      accuracy = ets_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "ETS",
+                                            RMSE = ets_accuracy["RMSE"],
+                                            MAE = ets_accuracy["MAE"],
+                                            MAPE = ets_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # TBATS (Trigonometric, Box-Cox, ARMA errors, Trend, Seasonality)
+  if ("tbats" %in% models && frequency > 1) {
+    cat("Fitting TBATS...\n")
+    tbats_model <- tbats(train_ts)
+    tbats_forecast <- forecast(tbats_model, h = horizon)
+    tbats_accuracy <- accuracy(tbats_forecast, test_ts)[2, ]
+    
+    forecast_results$tbats <- list(
+      model = tbats_model,
+      forecast = tbats_forecast,
+      accuracy = tbats_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "TBATS",
+                                            RMSE = tbats_accuracy["RMSE"],
+                                            MAE = tbats_accuracy["MAE"],
+                                            MAPE = tbats_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # Prophet
+  if ("prophet" %in% models) {
+    cat("Fitting Prophet...\n")
+    # Prepare data for Prophet
+    prophet_df <- data.frame(
+      ds = seq.Date(from = as.Date("2000-01-01"), 
+                    by = ifelse(frequency == 12, "month", 
+                                ifelse(frequency == 4, "quarter", "day")),
+                    length.out = length(train_ts)),
+      y = as.numeric(train_ts)
+    )
+    
+    prophet_model <- prophet(prophet_df, yearly.seasonality = (frequency == 12))
+    
+    future <- make_future_dataframe(prophet_model, periods = horizon)
+    prophet_forecast <- predict(prophet_model, future)
+    
+    # Calculate accuracy
+    prophet_pred <- tail(prophet_forecast$yhat, horizon)
+    prophet_actual <- as.numeric(test_ts)[1:min(horizon, length(test_ts))]
+    
+    prophet_accuracy <- accuracy(prophet_pred, prophet_actual)
+    
+    forecast_results$prophet <- list(
+      model = prophet_model,
+      forecast = prophet_forecast,
+      accuracy = prophet_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "Prophet",
+                                            RMSE = prophet_accuracy["RMSE"],
+                                            MAE = prophet_accuracy["MAE"],
+                                            MAPE = prophet_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # Neural Network Time Series
+  if ("neural" %in% models) {
+    cat("Fitting Neural Network...\n")
+    nnar_model <- nnetar(train_ts)
+    nnar_forecast <- forecast(nnar_model, h = horizon)
+    nnar_accuracy <- accuracy(nnar_forecast, test_ts)[2, ]
+    
+    forecast_results$neural <- list(
+      model = nnar_model,
+      forecast = nnar_forecast,
+      accuracy = nnar_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "Neural Network",
+                                            RMSE = nnar_accuracy["RMSE"],
+                                            MAE = nnar_accuracy["MAE"],
+                                            MAPE = nnar_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # Ensemble forecast (simple average)
+  if (length(forecast_results) > 1) {
+    cat("Creating ensemble forecast...\n")
+    
+    # Extract point forecasts
+    point_forecasts <- lapply(forecast_results, function(x) {
+      as.numeric(x$forecast$mean)[1:horizon]
+    })
+    
+    # Create ensemble (simple average)
+    ensemble_forecast <- rowMeans(do.call(cbind, point_forecasts))
+    
+    # Calculate ensemble accuracy
+    ensemble_accuracy <- accuracy(ensemble_forecast, 
+                                  as.numeric(test_ts)[1:min(horizon, length(test_ts))])
+    
+    forecast_results$ensemble <- list(
+      forecast = ensemble_forecast,
+      accuracy = ensemble_accuracy
+    )
+    
+    accuracy_comparison <- rbind(accuracy_comparison,
+                                 data.frame(Model = "Ensemble",
+                                            RMSE = ensemble_accuracy["RMSE"],
+                                            MAE = ensemble_accuracy["MAE"],
+                                            MAPE = ensemble_accuracy["MAPE"],
+                                            stringsAsFactors = FALSE))
+  }
+  
+  # Identify best model
+  accuracy_comparison <- accuracy_comparison %>%
+    arrange(RMSE)
+  
+  best_model_name <- accuracy_comparison$Model[1]
+  
+  # Create forecast plot
+  forecast_plot <- autoplot(ts_data) +
+    autolayer(forecast_results[[tolower(gsub(" ", "_", best_model_name))]]$forecast, 
+              series = best_model_name,
+              alpha = 0.5) +
+    labs(title = paste("Time Series Forecast - Best Model:", best_model_name),
+         x = "Time", y = "Value") +
+    theme_minimal()
+  
+  # Create accuracy comparison plot
+  accuracy_plot <- ggplot(accuracy_comparison, 
+                          aes(x = reorder(Model, -RMSE), y = RMSE)) +
+    geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+    geom_text(aes(label = round(RMSE, 3)), hjust = -0.2, size = 3) +
+    coord_flip() +
+    labs(title = "Forecast Model Accuracy Comparison",
+         x = "Model", y = "RMSE (Lower is Better)") +
+    theme_minimal()
+  
+  results <- list(
+    forecasts = forecast_results,
+    accuracy_comparison = accuracy_comparison,
+    best_model = best_model_name,
+    horizon = horizon,
+    frequency = frequency,
+    plots = list(
+      forecast_plot = forecast_plot,
+      accuracy_plot = accuracy_plot
+    ),
+    summary = list(
+      total_models = length(models),
+      best_model_rmse = accuracy_comparison$RMSE[1],
+      best_model_mape = accuracy_comparison$MAPE[1],
+      forecast_horizon = horizon
+    )
+  )
+  
+  # Print summary
+  cat("\nTime Series Forecasting Summary:\n")
+  cat("===============================\n")
+  cat(sprintf("Time series length: %d\n", length(ts_data)))
+  cat(sprintf("Frequency: %d\n", frequency))
+  cat(sprintf("Forecast horizon: %d periods\n", horizon))
+  cat(sprintf("Best model: %s\n", best_model_name))
+  cat(sprintf("Best RMSE: %.4f\n", accuracy_comparison$RMSE[1]))
+  cat(sprintf("Best MAPE: %.2f%%\n", accuracy_comparison$MAPE[1]))
+  
+  return(results)
+}
+

@@ -1,0 +1,673 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 13 of 14
+# Title: Section_013
+# Lines: 8312 - 8976 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 12.1: MODEL EXPLANATION METHODS
+# ----------------------------------------------------------------------------
+
+#' @title Comprehensive Model Explainability
+#' @description Provides multiple explanation methods for model interpretability
+#' @param model Trained model object
+#' @param data Training or test data
+#' @param target Target variable
+#' @param method Explanation method: "shap", "lime", "permutation", "partial"
+#' @return Model explanations and visualizations
+
+explain_model <- function(model, data, target = NULL, 
+                          method = "shap", n_samples = 1000) {
+  
+  require(iml)
+  require(lime)
+  require(DALEX)
+  require(fastshap)
+  
+  # Prepare data
+  if (!is.null(target)) {
+    X <- data[, !names(data) %in% target, drop = FALSE]
+    y <- data[[target]]
+  } else {
+    X <- data
+    y <- NULL
+  }
+  
+  # Ensure data is in correct format
+  X <- as.data.frame(X)
+  
+  # Create predictor object
+  if (inherits(model, "train")) {
+    # caret model
+    predictor <- Predictor$new(
+      model = model,
+      data = X,
+      y = y,
+      predict.function = function(model, newdata) {
+        predict(model, newdata, type = "prob")[, 2]
+      }
+    )
+  } else if (inherits(model, "ranger")) {
+    # ranger model
+    predictor <- Predictor$new(
+      model = model,
+      data = X,
+      y = y,
+      predict.function = function(model, newdata) {
+        predict(model, newdata)$predictions
+      }
+    )
+  } else if (inherits(model, "xgb.Booster")) {
+    # xgboost model
+    predictor <- Predictor$new(
+      model = model,
+      data = X,
+      y = y,
+      predict.function = function(model, newdata) {
+        predict(model, as.matrix(newdata))
+      }
+    )
+  } else {
+    # Generic model (try default)
+    predictor <- tryCatch({
+      Predictor$new(model = model, data = X, y = y)
+    }, error = function(e) {
+      stop(sprintf("Model type not supported: %s", class(model)[1]))
+    })
+  }
+  
+  explanation_results <- list(
+    method = method,
+    model_type = class(model)[1],
+    data_dimensions = dim(X),
+    timestamp = Sys.time()
+  )
+  
+  # Apply selected explanation method
+  if (method == "shap") {
+    # SHAP (SHapley Additive exPlanations)
+    cat("Calculating SHAP values...\n")
+    
+    # Use fastshap for efficiency
+    if (require(fastshap)) {
+      # Sample data for faster computation
+      if (n_samples < nrow(X)) {
+        sample_idx <- sample(1:nrow(X), n_samples)
+        X_sample <- X[sample_idx, ]
+      } else {
+        X_sample <- X
+      }
+      
+      # Calculate SHAP values
+      shap_explainer <- explain(
+        model,
+        X = X_sample,
+        nsim = 100,
+        pred_wrapper = function(model, newdata) {
+          if (inherits(model, "xgb.Booster")) {
+            predict(model, as.matrix(newdata))
+          } else {
+            predict(model, newdata)
+          }
+        }
+      )
+      
+      explanation_results$shap_values <- shap_explainer
+      explanation_results$feature_importance <- colMeans(abs(shap_explainer))
+      
+    } else {
+      # Fallback to iml
+      shap <- FeatureEffect$new(predictor, feature = names(X)[1], method = "shapley")
+      explanation_results$shap_example <- shap
+    }
+    
+  } else if (method == "lime") {
+    # LIME (Local Interpretable Model-agnostic Explanations)
+    cat("Calculating LIME explanations...\n")
+    
+    # Prepare explainer
+    lime_explainer <- lime(
+      X,
+      model,
+      bin_continuous = TRUE,
+      n_bins = 10,
+      quantile_bins = FALSE
+    )
+    
+    # Explain first few instances
+    n_explain <- min(10, nrow(X))
+    explanations <- lime::explain(
+      X[1:n_explain, ],
+      lime_explainer,
+      n_features = 5,
+      n_permutations = 5000,
+      feature_select = "auto"
+    )
+    
+    explanation_results$lime_explainer <- lime_explainer
+    explanation_results$explanations <- explanations
+    
+  } else if (method == "permutation") {
+    # Permutation Feature Importance
+    cat("Calculating permutation feature importance...\n")
+    
+    importance <- FeatureImp$new(
+      predictor,
+      loss = if (!is.null(y)) "ce" else "mse",
+      compare = "difference",
+      n.repetitions = 10
+    )
+    
+    explanation_results$feature_importance <- importance$results
+    explanation_results$importance_plot <- plot(importance)
+    
+  } else if (method == "partial") {
+    # Partial Dependence Plots
+    cat("Calculating partial dependence...\n")
+    
+    # Select top features for PDP
+    if (ncol(X) > 5) {
+      # Get feature importance first
+      importance <- FeatureImp$new(predictor, loss = "mse", n.repetitions = 5)
+      top_features <- importance$results$feature[1:5]
+    } else {
+      top_features <- names(X)
+    }
+    
+    # Calculate PDP for each top feature
+    pdps <- list()
+    for (feature in top_features) {
+      pdp <- FeatureEffect$new(predictor, feature = feature, method = "pdp")
+      pdps[[feature]] <- pdp$results
+    }
+    
+    explanation_results$partial_dependence <- pdps
+    
+  } else if (method == "all") {
+    # Run all explanation methods
+    cat("Running comprehensive model explanation...\n")
+    
+    all_results <- list()
+    
+    # Feature importance
+    all_results$importance <- FeatureImp$new(predictor, loss = "mse")$results
+    
+    # Partial dependence for top 3 features
+    top_features <- all_results$importance$feature[1:3]
+    all_results$partial_dependence <- lapply(top_features, function(f) {
+      FeatureEffect$new(predictor, feature = f, method = "pdp")$results
+    })
+    names(all_results$partial_dependence) <- top_features
+    
+    # ALE plots
+    all_results$ale_plots <- lapply(top_features, function(f) {
+      FeatureEffect$new(predictor, feature = f, method = "ale")$results
+    })
+    names(all_results$ale_plots) <- top_features
+    
+    # Local explanations for first 5 instances
+    if (nrow(X) >= 5) {
+      local_explanations <- list()
+      for (i in 1:5) {
+        local_pred <- Predictor$new(
+          model = model,
+          data = X[i, , drop = FALSE],
+          predict.function = predictor$predict.function
+        )
+        local_effect <- FeatureEffect$new(local_pred, feature = top_features[1])
+        local_explanations[[i]] <- local_effect$results
+      }
+      all_results$local_explanations <- local_explanations
+    }
+    
+    explanation_results <- c(explanation_results, all_results)
+  }
+  
+  # Calculate global model statistics
+  explanation_results$global_stats <- list(
+    n_features = ncol(X),
+    feature_types = sapply(X, class),
+    feature_ranges = lapply(X, function(col) {
+      if (is.numeric(col)) range(col, na.rm = TRUE) else unique(col)
+    })
+  )
+  
+  # Create explanation visualizations
+  explanation_results$plots <- create_explanation_plots(explanation_results, X)
+  
+  cat("Model explanation completed.\n")
+  
+  return(explanation_results)
+}
+
+#' @title Create Explanation Visualizations
+#' @description Generates visualizations for model explanations
+#' @param explanation_results Explanation results from explain_model
+#' @param data Feature data
+#' @return List of ggplot objects
+
+create_explanation_plots <- function(explanation_results, data) {
+  
+  plots <- list()
+  
+  # Feature Importance Plot
+  if (!is.null(explanation_results$feature_importance)) {
+    if (is.data.frame(explanation_results$feature_importance)) {
+      importance_df <- explanation_results$feature_importance
+    } else {
+      importance_df <- data.frame(
+        feature = names(explanation_results$feature_importance),
+        importance = as.numeric(explanation_results$feature_importance),
+        stringsAsFactors = FALSE
+      )
+    }
+    
+    importance_df <- importance_df[order(importance_df$importance, decreasing = TRUE), ]
+    importance_df <- head(importance_df, 15)  # Top 15 features
+    
+    plots$feature_importance <- ggplot(importance_df, 
+                                       aes(x = reorder(feature, importance), 
+                                           y = importance)) +
+      geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+      coord_flip() +
+      labs(title = "Feature Importance",
+           x = "Feature",
+           y = "Importance") +
+      theme_minimal()
+  }
+  
+  # Partial Dependence Plots
+  if (!is.null(explanation_results$partial_dependence)) {
+    pdp_list <- explanation_results$partial_dependence
+    
+    for (i in seq_along(pdp_list)) {
+      feature_name <- names(pdp_list)[i]
+      pdp_data <- pdp_list[[i]]
+      
+      if (is.data.frame(pdp_data) && nrow(pdp_data) > 0) {
+        plots[[paste0("pdp_", feature_name)]] <- ggplot(pdp_data, 
+                                                        aes(x = .data[[feature_name]], 
+                                                            y = .data[[".value"]])) +
+          geom_line(color = "darkred", size = 1.5) +
+          geom_ribbon(aes(ymin = .data[[".lower"]], 
+                          ymax = .data[[".upper"]]), 
+                      alpha = 0.2, fill = "steelblue") +
+          labs(title = paste("Partial Dependence:", feature_name),
+               x = feature_name,
+               y = "Prediction") +
+          theme_minimal()
+      }
+    }
+  }
+  
+  # SHAP Summary Plot
+  if (!is.null(explanation_results$shap_values)) {
+    shap_data <- explanation_results$shap_values
+    
+    if (is.matrix(shap_data) || is.data.frame(shap_data)) {
+      # Calculate mean absolute SHAP values
+      mean_shap <- colMeans(abs(shap_data), na.rm = TRUE)
+      shap_importance <- data.frame(
+        feature = names(mean_shap),
+        importance = mean_shap,
+        stringsAsFactors = FALSE
+      )
+      
+      shap_importance <- shap_importance[order(shap_importance$importance, decreasing = TRUE), ]
+      shap_importance <- head(shap_importance, 15)
+      
+      plots$shap_importance <- ggplot(shap_importance, 
+                                      aes(x = reorder(feature, importance), 
+                                          y = importance)) +
+        geom_bar(stat = "identity", fill = "purple", alpha = 0.7) +
+        coord_flip() +
+        labs(title = "SHAP Feature Importance",
+             x = "Feature",
+             y = "Mean |SHAP|") +
+        theme_minimal()
+    }
+  }
+  
+  # Feature Distribution Plots
+  numeric_features <- names(data)[sapply(data, is.numeric)]
+  if (length(numeric_features) > 0) {
+    plots$feature_distributions <- ggplot(gather(data[, numeric_features[1:min(4, length(numeric_features))]]),
+                                          aes(x = value)) +
+      geom_histogram(fill = "steelblue", alpha = 0.7, bins = 30) +
+      facet_wrap(~ key, scales = "free") +
+      labs(title = "Feature Distributions",
+           x = "Value",
+           y = "Count") +
+      theme_minimal()
+  }
+  
+  # Correlation Heatmap
+  numeric_data <- data[, sapply(data, is.numeric), drop = FALSE]
+  if (ncol(numeric_data) >= 2) {
+    cor_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+    
+    plots$correlation_heatmap <- ggplot(reshape2::melt(cor_matrix),
+                                        aes(x = Var1, y = Var2, fill = value)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "blue", mid = "white", high = "red", 
+                           midpoint = 0, limits = c(-1, 1)) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      labs(title = "Feature Correlation Heatmap",
+           x = "",
+           y = "",
+           fill = "Correlation")
+  }
+  
+  return(plots)
+}
+
+# SECTION 12.2: FAIRNESS & BIAS DETECTION
+# ----------------------------------------------------------------------------
+
+#' @title Model Fairness Assessment
+#' @description Assesses model fairness across protected groups
+#' @param model Trained model
+#' @param data Test data
+#' @param target True labels
+#' @param protected_attributes List of protected attributes to assess
+#' @param fairness_metrics Metrics to calculate
+#' @return Fairness assessment results
+
+assess_fairness <- function(model, data, target, 
+                            protected_attributes = list("gender", "race", "age_group"),
+                            fairness_metrics = c("demographic_parity", 
+                                                 "equal_opportunity",
+                                                 "predictive_parity")) {
+  
+  require(fairness)
+  require(ModelMetrics)
+  
+  # Make predictions
+  predictions <- predict(model, data)
+  
+  # Convert to binary if needed
+  if (is.factor(predictions) || is.character(predictions)) {
+    # Assume first level is positive for binary classification
+    predictions_binary <- as.numeric(predictions == levels(predictions)[1])
+  } else if (is.numeric(predictions)) {
+    # Assume regression or probabilities
+    if (all(predictions >= 0 & predictions <= 1)) {
+      # Probabilities, convert to binary with 0.5 threshold
+      predictions_binary <- as.numeric(predictions > 0.5)
+    } else {
+      # Regression, use median threshold
+      predictions_binary <- as.numeric(predictions > median(predictions))
+    }
+  }
+  
+  # Convert target to binary if needed
+  if (is.factor(target) || is.character(target)) {
+    target_binary <- as.numeric(target == levels(as.factor(target))[1])
+  } else if (is.numeric(target)) {
+    if (all(target %in% c(0, 1))) {
+      target_binary <- target
+    } else {
+      target_binary <- as.numeric(target > median(target))
+    }
+  }
+  
+  fairness_results <- list(
+    model_type = class(model)[1],
+    protected_attributes = protected_attributes,
+    metrics_calculated = fairness_metrics,
+    timestamp = Sys.time()
+  )
+  
+  # Calculate fairness metrics for each protected attribute
+  for (attr in protected_attributes) {
+    if (!attr %in% names(data)) {
+      warning(sprintf("Protected attribute '%s' not found in data", attr))
+      next
+    }
+    
+    groups <- data[[attr]]
+    
+    # Skip if too few groups or too many unique values
+    if (length(unique(groups)) < 2 || length(unique(groups)) > 10) {
+      warning(sprintf("Attribute '%s' has %d unique values, skipping", 
+                      attr, length(unique(groups))))
+      next
+    }
+    
+    group_metrics <- list()
+    
+    for (metric in fairness_metrics) {
+      if (metric == "demographic_parity") {
+        # Demographic Parity (Statistical Parity)
+        group_rates <- tapply(predictions_binary, groups, mean, na.rm = TRUE)
+        demographic_parity_score <- max(group_rates) - min(group_rates)
+        
+        group_metrics$demographic_parity <- list(
+          score = demographic_parity_score,
+          group_rates = group_rates,
+          interpretation = if (demographic_parity_score < 0.1) "Fair" else "Biased"
+        )
+        
+      } else if (metric == "equal_opportunity") {
+        # Equal Opportunity (True Positive Rate Equality)
+        tpr_by_group <- tapply(
+          predictions_binary[target_binary == 1],
+          groups[target_binary == 1],
+          mean,
+          na.rm = TRUE
+        )
+        
+        equal_opportunity_score <- max(tpr_by_group, na.rm = TRUE) - 
+          min(tpr_by_group, na.rm = TRUE)
+        
+        group_metrics$equal_opportunity <- list(
+          score = equal_opportunity_score,
+          tpr_by_group = tpr_by_group,
+          interpretation = if (equal_opportunity_score < 0.1) "Fair" else "Biased"
+        )
+        
+      } else if (metric == "predictive_parity") {
+        # Predictive Parity (PPV Equality)
+        # Calculate precision by group
+        precision_by_group <- sapply(unique(groups), function(g) {
+          idx <- groups == g
+          tp <- sum(predictions_binary[idx] == 1 & target_binary[idx] == 1)
+          fp <- sum(predictions_binary[idx] == 1 & target_binary[idx] == 0)
+          if ((tp + fp) == 0) return(NA)
+          tp / (tp + fp)
+        })
+        
+        names(precision_by_group) <- unique(groups)
+        
+        predictive_parity_score <- max(precision_by_group, na.rm = TRUE) - 
+          min(precision_by_group, na.rm = TRUE)
+        
+        group_metrics$predictive_parity <- list(
+          score = predictive_parity_score,
+          precision_by_group = precision_by_group,
+          interpretation = if (predictive_parity_score < 0.1) "Fair" else "Biased"
+        )
+      }
+    }
+    
+    # Calculate confusion matrices by group
+    confusion_by_group <- list()
+    for (group in unique(groups)) {
+      idx <- groups == group
+      cm <- table(
+        Predicted = predictions_binary[idx],
+        Actual = target_binary[idx]
+      )
+      
+      # Calculate metrics from confusion matrix
+      if (all(dim(cm) == c(2, 2))) {
+        tn <- cm[1, 1]
+        fp <- cm[1, 2]
+        fn <- cm[2, 1]
+        tp <- cm[2, 2]
+        
+        metrics <- list(
+          accuracy = (tp + tn) / sum(cm),
+          precision = tp / (tp + fp),
+          recall = tp / (tp + fn),
+          specificity = tn / (tn + fp),
+          f1 = 2 * tp / (2 * tp + fp + fn)
+        )
+      } else {
+        metrics <- list(accuracy = NA, precision = NA, recall = NA, 
+                        specificity = NA, f1 = NA)
+      }
+      
+      confusion_by_group[[group]] <- list(
+        confusion_matrix = cm,
+        metrics = metrics
+      )
+    }
+    
+    fairness_results[[attr]] <- list(
+      group_metrics = group_metrics,
+      confusion_by_group = confusion_by_group,
+      group_distribution = table(groups),
+      overall_metrics = list(
+        accuracy = accuracy(target_binary, predictions_binary),
+        precision = precision(target_binary, predictions_binary),
+        recall = recall(target_binary, predictions_binary)
+      )
+    )
+  }
+  
+  # Create fairness visualizations
+  fairness_results$plots <- create_fairness_plots(fairness_results)
+  
+  # Generate fairness report
+  fairness_results$report <- generate_fairness_report(fairness_results)
+  
+  cat("Fairness assessment completed.\n")
+  
+  return(fairness_results)
+}
+
+#' @title Create Fairness Visualizations
+#' @description Generates visualizations for fairness assessment
+#' @param fairness_results Results from assess_fairness
+#' @return List of ggplot objects
+
+create_fairness_plots <- function(fairness_results) {
+  
+  plots <- list()
+  
+  # Extract protected attributes
+  protected_attrs <- names(fairness_results)[
+    names(fairness_results) %in% 
+      unlist(fairness_results$protected_attributes)
+  ]
+  
+  for (attr in protected_attrs) {
+    attr_results <- fairness_results[[attr]]
+    
+    # Demographic Parity Plot
+    if (!is.null(attr_results$group_metrics$demographic_parity)) {
+      dp_data <- data.frame(
+        group = names(attr_results$group_metrics$demographic_parity$group_rates),
+        positive_rate = attr_results$group_metrics$demographic_parity$group_rates
+      )
+      
+      plots[[paste0(attr, "_demographic_parity")]] <- 
+        ggplot(dp_data, aes(x = group, y = positive_rate, fill = group)) +
+        geom_bar(stat = "identity", alpha = 0.7) +
+        geom_hline(yintercept = mean(dp_data$positive_rate), 
+                   linetype = "dashed", color = "red") +
+        labs(title = paste("Demographic Parity:", attr),
+             subtitle = sprintf("Disparity: %.3f", 
+                                attr_results$group_metrics$demographic_parity$score),
+             x = attr,
+             y = "Positive Prediction Rate") +
+        theme_minimal() +
+        theme(legend.position = "none")
+    }
+    
+    # Equal Opportunity Plot
+    if (!is.null(attr_results$group_metrics$equal_opportunity)) {
+      eo_data <- data.frame(
+        group = names(attr_results$group_metrics$equal_opportunity$tpr_by_group),
+        tpr = attr_results$group_metrics$equal_opportunity$tpr_by_group
+      )
+      
+      plots[[paste0(attr, "_equal_opportunity")]] <- 
+        ggplot(eo_data, aes(x = group, y = tpr, fill = group)) +
+        geom_bar(stat = "identity", alpha = 0.7) +
+        geom_hline(yintercept = mean(eo_data$tpr, na.rm = TRUE), 
+                   linetype = "dashed", color = "red") +
+        labs(title = paste("Equal Opportunity:", attr),
+             subtitle = sprintf("Disparity: %.3f", 
+                                attr_results$group_metrics$equal_opportunity$score),
+             x = attr,
+             y = "True Positive Rate") +
+        theme_minimal() +
+        theme(legend.position = "none")
+    }
+    
+    # Group Distribution Plot
+    dist_data <- data.frame(
+      group = names(attr_results$group_distribution),
+      count = as.numeric(attr_results$group_distribution)
+    )
+    
+    plots[[paste0(attr, "_distribution")]] <- 
+      ggplot(dist_data, aes(x = group, y = count, fill = group)) +
+      geom_bar(stat = "identity", alpha = 0.7) +
+      labs(title = paste("Group Distribution:", attr),
+           x = attr,
+           y = "Count") +
+      theme_minimal() +
+      theme(legend.position = "none")
+  }
+  
+  # Fairness Radar Chart (if multiple attributes)
+  if (length(protected_attrs) > 1) {
+    # Prepare data for radar chart
+    radar_data <- data.frame()
+    
+    for (attr in protected_attrs) {
+      if (!is.null(fairness_results[[attr]]$group_metrics$demographic_parity)) {
+        radar_data <- rbind(radar_data, data.frame(
+          attribute = attr,
+          metric = "Demographic Parity",
+          score = 1 - min(fairness_results[[attr]]$group_metrics$demographic_parity$score, 1)
+        ))
+      }
+      
+      if (!is.null(fairness_results[[attr]]$group_metrics$equal_opportunity)) {
+        radar_data <- rbind(radar_data, data.frame(
+          attribute = attr,
+          metric = "Equal Opportunity",
+          score = 1 - min(fairness_results[[attr]]$group_metrics$equal_opportunity$score, 1)
+        ))
+      }
+    }
+    
+    if (nrow(radar_data) > 0) {
+      # Create radar plot
+      radar_plot <- ggplot(radar_data, aes(x = metric, y = score, 
+                                           group = attribute, color = attribute)) +
+        geom_point(size = 3) +
+        geom_line(size = 1) +
+        coord_polar() +
+        ylim(0, 1) +
+        labs(title = "Fairness Radar Chart",
+             x = "",
+             y = "Fairness Score (1 = Perfect Fairness)") +
+        theme_minimal() +
+        theme(legend.position = "bottom")
+      
+      plots$fairness_radar <- radar_plot
+    }
+  }
+  
+  return(plots)
+}
+

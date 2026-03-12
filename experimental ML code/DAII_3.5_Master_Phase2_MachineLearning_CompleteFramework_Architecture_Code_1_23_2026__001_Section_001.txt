@@ -1,0 +1,104 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 1 of 14
+# Title: Section_001
+# Lines: 8 - 103 of 9611
+# =========================================================
+
+# ============================================================================
+#' @title DAII Framework Initialization
+#' @description Loads all required packages and sets up the framework environment
+#' @param install_missing Logical, install missing packages (default: FALSE)
+#' @param parallel_cores Number of cores for parallel processing (default: auto)
+#' @return Configured environment with all dependencies loaded
+
+initialize_daii_framework <- function(install_missing = FALSE, 
+                                      parallel_cores = NULL) {
+  
+  # Core dependencies list
+  core_packages <- c(
+    # Tidyverse ecosystem
+    "tidyverse", "dplyr", "tidyr", "purrr", "stringr", "lubridate", "forcats",
+    # Data manipulation
+    "data.table", "vroom", "feather", "arrow",
+    # Statistical modeling
+    "stats", "MASS", "broom", "infer", "modelr",
+    # Machine learning
+    "caret", "mlr3", "tidymodels", "xgboost", "lightgbm", "ranger", "glmnet",
+    # Deep learning
+    "keras", "tensorflow", "torch", "reticulate",
+    # Time series
+    "forecast", "tsibble", "fable", "prophet",
+    # Anomaly detection
+    "anomalize", "isotree", "solitude",
+    # Visualization
+    "ggplot2", "plotly", "patchwork", "ggridges", "ggcorrplot", "viridis",
+    # Reporting
+    "rmarkdown", "knitr", "flexdashboard", "shiny",
+    # Performance & optimization
+    "doParallel", "future", "furrr", "microbenchmark", "profvis",
+    # Utilities
+    "here", "renv", "config", "logger", "checkmate", "testthat"
+  )
+  
+  # Check and install missing packages if requested
+  missing_packages <- setdiff(core_packages, installed.packages()[, "Package"])
+  
+  if (length(missing_packages) > 0) {
+    if (install_missing) {
+      message("Installing missing packages: ", paste(missing_packages, collapse = ", "))
+      install.packages(missing_packages, dependencies = TRUE)
+    } else {
+      warning("Missing packages detected. Run with install_missing = TRUE to install.")
+    }
+  }
+  
+  # Load all packages
+  suppressPackageStartupMessages({
+    lapply(core_packages[core_packages %in% installed.packages()[, "Package"]], 
+           library, character.only = TRUE)
+  })
+  
+  # Set parallel processing
+  if (is.null(parallel_cores)) {
+    parallel_cores <- parallel::detectCores() - 1
+  }
+  
+  # Initialize parallel backend
+  cl <- parallel::makeCluster(parallel_cores)
+  doParallel::registerDoParallel(cl)
+  
+  # Set ggplot2 theme
+  theme_set(theme_minimal(base_size = 11) +
+              theme(plot.title = element_text(face = "bold", size = 13),
+                    plot.subtitle = element_text(color = "gray40"),
+                    plot.caption = element_text(color = "gray60", size = 9),
+                    panel.grid.minor = element_blank(),
+                    legend.position = "bottom"))
+  
+  # Create framework directories
+  dirs_to_create <- c("data/raw", "data/processed", "models", "reports",
+                      "logs", "exports", "tests", "config")
+  
+  sapply(dirs_to_create, function(dir) {
+    if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  })
+  
+  # Initialize logging
+  logger::log_threshold(logger::INFO)
+  logger::log_appender(logger::appender_file("logs/daii_framework.log"))
+  
+  logger::log_info("DAII Framework v3.5 initialized successfully")
+  logger::log_info("Parallel processing with {parallel_cores} cores")
+  
+  return(list(
+    status = "success",
+    packages_loaded = length(core_packages),
+    parallel_cores = parallel_cores,
+    directories_created = dirs_to_create,
+    timestamp = Sys.time()
+  ))
+}
+
+# MODULE 1: CORE FUNCTIONS & UTILITIES

@@ -1,0 +1,837 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 7 of 14
+# Title: Section_007
+# Lines: 3828 - 4656 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 6.1: NEURAL NETWORK ARCHITECTURES
+# ----------------------------------------------------------------------------
+
+#' @title Flexible Neural Network Builder
+#' @description Builds customizable neural network architectures
+#' @param input_dim Input dimension (number of features)
+#' @param layers List of layer configurations
+#' @param activation Activation functions for each layer
+#' @param dropout Dropout rates for regularization
+#' @param batch_norm Whether to use batch normalization
+#' @return Compiled Keras model
+
+build_neural_network <- function(input_dim, 
+                                 layers = c(128, 64, 32),
+                                 activation = c("relu", "relu", "relu"),
+                                 dropout = c(0.2, 0.2, 0.2),
+                                 batch_norm = TRUE,
+                                 output_activation = NULL,
+                                 problem_type = "regression") {
+  
+  require(keras)
+  require(tensorflow)
+  
+  # Initialize model
+  model <- keras_model_sequential()
+  
+  # Input layer
+  model %>% layer_dense(units = layers[1], input_shape = input_dim)
+  
+  if (batch_norm) {
+    model %>% layer_batch_normalization()
+  }
+  
+  model %>% layer_activation(activation = activation[1])
+  
+  if (dropout[1] > 0) {
+    model %>% layer_dropout(rate = dropout[1])
+  }
+  
+  # Hidden layers
+  if (length(layers) > 1) {
+    for (i in 2:length(layers)) {
+      model %>% layer_dense(units = layers[i])
+      
+      if (batch_norm) {
+        model %>% layer_batch_normalization()
+      }
+      
+      model %>% layer_activation(activation = activation[min(i, length(activation))])
+      
+      if (dropout[min(i, length(dropout))] > 0) {
+        model %>% layer_dropout(rate = dropout[min(i, length(dropout))])
+      }
+    }
+  }
+  
+  # Output layer
+  if (problem_type == "regression") {
+    model %>% layer_dense(units = 1)
+    output_activation <- "linear"
+  } else if (problem_type == "binary_classification") {
+    model %>% layer_dense(units = 1, activation = "sigmoid")
+    output_activation <- "sigmoid"
+  } else if (problem_type == "multiclass_classification") {
+    model %>% layer_dense(units = output_dim, activation = "softmax")
+    output_activation <- "softmax"
+  }
+  
+  if (!is.null(output_activation)) {
+    model %>% layer_activation(activation = output_activation)
+  }
+  
+  # Compile model
+  if (problem_type == "regression") {
+    loss <- "mse"
+    metrics <- list("mae")
+  } else if (problem_type == "binary_classification") {
+    loss <- "binary_crossentropy"
+    metrics <- list("accuracy", keras::metric_auc(name = "auc"))
+  } else if (problem_type == "multiclass_classification") {
+    loss <- "categorical_crossentropy"
+    metrics <- list("accuracy")
+  }
+  
+  model %>% compile(
+    optimizer = optimizer_adam(learning_rate = 0.001),
+    loss = loss,
+    metrics = metrics
+  )
+  
+  # Model summary
+  cat("Neural Network Architecture:\n")
+  cat("============================\n")
+  cat(sprintf("Input dimension: %d\n", input_dim))
+  cat(sprintf("Hidden layers: %s\n", paste(layers, collapse = " -> ")))
+  cat(sprintf("Activation: %s\n", paste(activation, collapse = " -> ")))
+  cat(sprintf("Dropout: %s\n", paste(dropout, collapse = " -> ")))
+  cat(sprintf("Batch normalization: %s\n", batch_norm))
+  cat(sprintf("Problem type: %s\n", problem_type))
+  cat(sprintf("Output activation: %s\n", output_activation))
+  
+  return(model)
+}
+
+#' @title Advanced Neural Network Training with Callbacks
+#' @description Trains neural network with advanced callbacks and monitoring
+#' @param model Keras model
+#' @param x_train Training features
+#' @param y_train Training labels
+#' @param x_val Validation features
+#' @param y_val Validation labels
+#' @param epochs Number of training epochs
+#' @param batch_size Batch size
+#' @param callbacks List of callbacks to use
+#' @param class_weights Optional class weights for imbalanced data
+#' @return Training history and trained model
+
+train_neural_network <- function(model, x_train, y_train, x_val = NULL, y_val = NULL,
+                                 epochs = 100, batch_size = 32, 
+                                 callbacks = c("early_stopping", "reduce_lr", "checkpoint"),
+                                 class_weights = NULL) {
+  
+  require(keras)
+  
+  # Prepare validation data
+  if (is.null(x_val) || is.null(y_val)) {
+    validation_split <- 0.2
+    validation_data <- NULL
+  } else {
+    validation_split <- 0
+    validation_data <- list(x_val, y_val)
+  }
+  
+  # Setup callbacks
+  callback_list <- list()
+  
+  if ("early_stopping" %in% callbacks) {
+    early_stopping <- callback_early_stopping(
+      monitor = "val_loss",
+      patience = 10,
+      restore_best_weights = TRUE,
+      verbose = 1
+    )
+    callback_list <- append(callback_list, early_stopping)
+  }
+  
+  if ("reduce_lr" %in% callbacks) {
+    reduce_lr <- callback_reduce_lr_on_plateau(
+      monitor = "val_loss",
+      factor = 0.5,
+      patience = 5,
+      min_lr = 1e-6,
+      verbose = 1
+    )
+    callback_list <- append(callback_list, reduce_lr)
+  }
+  
+  if ("checkpoint" %in% callbacks) {
+    checkpoint <- callback_model_checkpoint(
+      filepath = "models/best_model.h5",
+      monitor = "val_loss",
+      save_best_only = TRUE,
+      verbose = 1
+    )
+    callback_list <- append(callback_list, checkpoint)
+  }
+  
+  if ("tensorboard" %in% callbacks) {
+    tensorboard <- callback_tensorboard(
+      log_dir = "logs/tensorboard",
+      histogram_freq = 1,
+      write_graph = TRUE,
+      write_images = TRUE
+    )
+    callback_list <- append(callback_list, tensorboard)
+  }
+  
+  # Training
+  cat("Training Neural Network...\n")
+  cat(sprintf("Training samples: %d\n", nrow(x_train)))
+  if (!is.null(x_val)) {
+    cat(sprintf("Validation samples: %d\n", nrow(x_val)))
+  }
+  cat(sprintf("Epochs: %d\n", epochs))
+  cat(sprintf("Batch size: %d\n", batch_size))
+  
+  history <- model %>% fit(
+    x = x_train,
+    y = y_train,
+    epochs = epochs,
+    batch_size = batch_size,
+    validation_split = validation_split,
+    validation_data = validation_data,
+    callbacks = callback_list,
+    class_weight = class_weights,
+    verbose = 1
+  )
+  
+  # Load best model if checkpoint was used
+  if ("checkpoint" %in% callbacks && file.exists("models/best_model.h5")) {
+    model <- load_model_hdf5("models/best_model.h5")
+    cat("Loaded best model from checkpoint\n")
+  }
+  
+  # Training summary
+  training_summary <- list(
+    final_loss = tail(history$metrics$loss, 1),
+    final_val_loss = tail(history$metrics$val_loss, 1),
+    final_accuracy = if (!is.null(history$metrics$accuracy)) 
+      tail(history$metrics$accuracy, 1) else NULL,
+    final_val_accuracy = if (!is.null(history$metrics$val_accuracy)) 
+      tail(history$metrics$val_accuracy, 1) else NULL,
+    epochs_completed = length(history$metrics$loss),
+    best_epoch = which.min(history$metrics$val_loss)[1],
+    best_val_loss = min(history$metrics$val_loss, na.rm = TRUE)
+  )
+  
+  cat("\nTraining Summary:\n")
+  cat("================\n")
+  cat(sprintf("Final training loss: %.4f\n", training_summary$final_loss))
+  cat(sprintf("Final validation loss: %.4f\n", training_summary$final_val_loss))
+  if (!is.null(training_summary$final_accuracy)) {
+    cat(sprintf("Final training accuracy: %.4f\n", training_summary$final_accuracy))
+    cat(sprintf("Final validation accuracy: %.4f\n", training_summary$final_val_accuracy))
+  }
+  cat(sprintf("Best epoch: %d\n", training_summary$best_epoch))
+  cat(sprintf("Best validation loss: %.4f\n", training_summary$best_val_loss))
+  
+  return(list(
+    model = model,
+    history = history,
+    summary = training_summary
+  ))
+}
+
+#' @title Neural Network Hyperparameter Tuning
+#' @description Performs hyperparameter tuning using random search
+#' @param x_train Training features
+#' @param y_train Training labels
+#' @param x_val Validation features
+#' @param y_val Validation labels
+#' @param param_grid List of hyperparameters to tune
+#' @param n_iter Number of random search iterations
+#' @param epochs Epochs per trial
+#' @param batch_size Batch size
+#' @return Best model and tuning results
+
+tune_neural_network <- function(x_train, y_train, x_val, y_val,
+                                param_grid = list(
+                                  layers = list(c(64, 32), c(128, 64, 32), c(256, 128, 64)),
+                                  activation = c("relu", "tanh", "elu"),
+                                  dropout = list(c(0.2, 0.2), c(0.3, 0.3), c(0.4, 0.4)),
+                                  learning_rate = c(0.001, 0.01, 0.0001)
+                                ),
+                                n_iter = 10,
+                                epochs = 50,
+                                batch_size = 32,
+                                problem_type = "regression") {
+  
+  require(keras)
+  require(dplyr)
+  
+  # Prepare results storage
+  tuning_results <- list()
+  performance_metrics <- data.frame()
+  
+  # Determine output dimension for classification
+  if (problem_type == "multiclass_classification") {
+    output_dim <- length(unique(y_train))
+  } else {
+    output_dim <- 1
+  }
+  
+  # Random search
+  for (i in 1:n_iter) {
+    cat(sprintf("\nTrial %d/%d\n", i, n_iter))
+    
+    # Sample hyperparameters
+    params <- list()
+    for (param_name in names(param_grid)) {
+      param_values <- param_grid[[param_name]]
+      params[[param_name]] <- if (is.list(param_values[[1]])) {
+        sample(param_values, 1)[[1]]
+      } else {
+        sample(param_values, 1)
+      }
+    }
+    
+    # Build model with sampled parameters
+    model <- build_neural_network(
+      input_dim = ncol(x_train),
+      layers = params$layers,
+      activation = rep(params$activation, length(params$layers)),
+      dropout = if (!is.null(params$dropout)) params$dropout else 
+        rep(0, length(params$layers)),
+      batch_norm = if (!is.null(params$batch_norm)) params$batch_norm else TRUE,
+      output_activation = NULL,
+      problem_type = problem_type
+    )
+    
+    # Update optimizer with sampled learning rate
+    if (!is.null(params$learning_rate)) {
+      model %>% compile(
+        optimizer = optimizer_adam(learning_rate = params$learning_rate),
+        loss = model$loss,
+        metrics = model$metrics
+      )
+    }
+    
+    # Train model
+    training_result <- train_neural_network(
+      model = model,
+      x_train = x_train,
+      y_train = y_train,
+      x_val = x_val,
+      y_val = y_val,
+      epochs = epochs,
+      batch_size = batch_size,
+      callbacks = c("early_stopping", "reduce_lr")
+    )
+    
+    # Store results
+    trial_result <- list(
+      trial = i,
+      parameters = params,
+      final_val_loss = training_result$summary$final_val_loss,
+      final_val_accuracy = training_result$summary$final_val_accuracy,
+      best_val_loss = training_result$summary$best_val_loss,
+      epochs_completed = training_result$summary$epochs_completed
+    )
+    
+    tuning_results[[i]] <- trial_result
+    
+    # Add to performance metrics
+    performance_metrics <- rbind(performance_metrics,
+                                 data.frame(
+                                   Trial = i,
+                                   Layers = paste(params$layers, collapse = "-"),
+                                   Activation = params$activation,
+                                   Dropout = if (!is.null(params$dropout)) 
+                                     paste(params$dropout, collapse = "-") else "0",
+                                   LearningRate = if (!is.null(params$learning_rate)) 
+                                     params$learning_rate else 0.001,
+                                   ValLoss = trial_result$final_val_loss,
+                                   ValAccuracy = if (!is.null(trial_result$final_val_accuracy)) 
+                                     trial_result$final_val_accuracy else NA,
+                                   stringsAsFactors = FALSE
+                                 ))
+    
+    cat(sprintf("Validation loss: %.4f\n", trial_result$final_val_loss))
+    if (!is.null(trial_result$final_val_accuracy)) {
+      cat(sprintf("Validation accuracy: %.4f\n", trial_result$final_val_accuracy))
+    }
+  }
+  
+  # Identify best trial
+  performance_metrics <- performance_metrics %>%
+    arrange(ValLoss)
+  
+  best_trial <- performance_metrics$Trial[1]
+  best_params <- tuning_results[[best_trial]]$parameters
+  
+  cat("\nHyperparameter Tuning Summary:\n")
+  cat("==============================\n")
+  cat(sprintf("Best trial: %d\n", best_trial))
+  cat(sprintf("Best validation loss: %.4f\n", performance_metrics$ValLoss[1]))
+  if (!is.na(performance_metrics$ValAccuracy[1])) {
+    cat(sprintf("Best validation accuracy: %.4f\n", performance_metrics$ValAccuracy[1]))
+  }
+  cat("Best parameters:\n")
+  for (param_name in names(best_params)) {
+    cat(sprintf("  %s: %s\n", param_name, 
+                if (is.numeric(best_params[[param_name]])) 
+                  best_params[[param_name]] else 
+                    paste(best_params[[param_name]], collapse = ", ")))
+  }
+  
+  # Retrain best model with more epochs
+  cat("\nRetraining best model...\n")
+  best_model <- build_neural_network(
+    input_dim = ncol(x_train),
+    layers = best_params$layers,
+    activation = rep(best_params$activation, length(best_params$layers)),
+    dropout = if (!is.null(best_params$dropout)) best_params$dropout else 
+      rep(0, length(best_params$layers)),
+    batch_norm = if (!is.null(best_params$batch_norm)) best_params$batch_norm else TRUE,
+    output_activation = NULL,
+    problem_type = problem_type
+  )
+  
+  if (!is.null(best_params$learning_rate)) {
+    best_model %>% compile(
+      optimizer = optimizer_adam(learning_rate = best_params$learning_rate),
+      loss = best_model$loss,
+      metrics = best_model$metrics
+    )
+  }
+  
+  final_training <- train_neural_network(
+    model = best_model,
+    x_train = x_train,
+    y_train = y_train,
+    x_val = x_val,
+    y_val = y_val,
+    epochs = epochs * 2,  # Double epochs for final training
+    batch_size = batch_size,
+    callbacks = c("early_stopping", "reduce_lr", "checkpoint")
+  )
+  
+  return(list(
+    tuning_results = tuning_results,
+    performance_metrics = performance_metrics,
+    best_trial = best_trial,
+    best_parameters = best_params,
+    best_model = final_training$model,
+    training_history = final_training$history,
+    summary = list(
+      total_trials = n_iter,
+      best_val_loss = performance_metrics$ValLoss[1],
+      best_val_accuracy = performance_metrics$ValAccuracy[1]
+    )
+  ))
+}
+
+# SECTION 6.2: CONVOLUTIONAL NEURAL NETWORKS (CNNs)
+# ----------------------------------------------------------------------------
+
+#' @title CNN for Image Classification
+#' @description Builds CNN architecture for image data
+#' @param input_shape Input shape (height, width, channels)
+#' @param num_classes Number of output classes
+#' @param architecture CNN architecture type: "simple", "vgg", "resnet"
+#' @return Compiled CNN model
+
+build_cnn <- function(input_shape, num_classes, architecture = "simple") {
+  
+  require(keras)
+  
+  model <- keras_model_sequential()
+  
+  if (architecture == "simple") {
+    # Simple CNN
+    model %>%
+      layer_conv_2d(filters = 32, kernel_size = c(3, 3), 
+                    activation = "relu", input_shape = input_shape) %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      layer_flatten() %>%
+      layer_dense(units = 128, activation = "relu") %>%
+      layer_dropout(rate = 0.5) %>%
+      layer_dense(units = num_classes, activation = "softmax")
+    
+  } else if (architecture == "vgg") {
+    # VGG-style CNN
+    model %>%
+      # Block 1
+      layer_conv_2d(filters = 64, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu", input_shape = input_shape) %>%
+      layer_conv_2d(filters = 64, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu") %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      # Block 2
+      layer_conv_2d(filters = 128, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu") %>%
+      layer_conv_2d(filters = 128, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu") %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      # Block 3
+      layer_conv_2d(filters = 256, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu") %>%
+      layer_conv_2d(filters = 256, kernel_size = c(3, 3), padding = "same",
+                    activation = "relu") %>%
+      layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+      
+      layer_flatten() %>%
+      layer_dense(units = 512, activation = "relu") %>%
+      layer_dropout(rate = 0.5) %>%
+      layer_dense(units = 512, activation = "relu") %>%
+      layer_dropout(rate = 0.5) %>%
+      layer_dense(units = num_classes, activation = "softmax")
+    
+  } else if (architecture == "resnet") {
+    # ResNet-style with residual connections
+    input_tensor <- layer_input(shape = input_shape)
+    
+    # Initial convolution
+    x <- layer_conv_2d(input_tensor, filters = 64, kernel_size = c(7, 7),
+                       strides = c(2, 2), padding = "same") %>%
+      layer_batch_normalization() %>%
+      layer_activation("relu") %>%
+      layer_max_pooling_2d(pool_size = c(3, 3), strides = c(2, 2), padding = "same")
+    
+    # Residual blocks
+    for (filters in c(64, 128, 256, 512)) {
+      for (block in 1:2) {
+        # Shortcut connection
+        shortcut <- x
+        
+        # First convolution
+        x <- layer_conv_2d(x, filters = filters, kernel_size = c(3, 3),
+                           padding = "same") %>%
+          layer_batch_normalization() %>%
+          layer_activation("relu")
+        
+        # Second convolution
+        x <- layer_conv_2d(x, filters = filters, kernel_size = c(3, 3),
+                           padding = "same") %>%
+          layer_batch_normalization()
+        
+        # Add shortcut if dimensions match
+        if (block == 1 && filters != 64) {
+          shortcut <- layer_conv_2d(shortcut, filters = filters, 
+                                    kernel_size = c(1, 1), strides = c(2, 2)) %>%
+            layer_batch_normalization()
+        }
+        
+        # Add shortcut and activation
+        x <- layer_add(list(x, shortcut)) %>%
+          layer_activation("relu")
+      }
+    }
+    
+    # Final layers
+    x <- layer_global_average_pooling_2d()(x)
+    x <- layer_dense(x, units = 512, activation = "relu")
+    x <- layer_dropout(x, rate = 0.5)
+    output_tensor <- layer_dense(x, units = num_classes, activation = "softmax")
+    
+    model <- keras_model(inputs = input_tensor, outputs = output_tensor)
+  }
+  
+  # Compile model
+  model %>% compile(
+    optimizer = optimizer_adam(learning_rate = 0.001),
+    loss = "categorical_crossentropy",
+    metrics = c("accuracy", keras::metric_auc(name = "auc"))
+  )
+  
+  cat(sprintf("Built %s CNN with input shape: ", architecture))
+  cat(paste(input_shape, collapse = "x"))
+  cat(sprintf("\nNumber of classes: %d\n", num_classes))
+  
+  return(model)
+}
+
+#' @title Image Data Augmentation
+#' @description Creates image data generators with augmentation
+#' @param train_dir Training directory
+#' @param val_dir Validation directory
+#' @param test_dir Test directory
+#' @param target_size Target image size
+#' @param batch_size Batch size
+#' @param augmentation_params List of augmentation parameters
+#' @return List of data generators
+
+create_image_generators <- function(train_dir, val_dir = NULL, test_dir = NULL,
+                                    target_size = c(224, 224), batch_size = 32,
+                                    augmentation_params = list(
+                                      rotation_range = 20,
+                                      width_shift_range = 0.2,
+                                      height_shift_range = 0.2,
+                                      shear_range = 0.2,
+                                      zoom_range = 0.2,
+                                      horizontal_flip = TRUE,
+                                      fill_mode = "nearest"
+                                    )) {
+  
+  require(keras)
+  
+  # Create training data generator with augmentation
+  train_datagen <- image_data_generator(
+    rescale = 1/255,
+    rotation_range = augmentation_params$rotation_range,
+    width_shift_range = augmentation_params$width_shift_range,
+    height_shift_range = augmentation_params$height_shift_range,
+    shear_range = augmentation_params$shear_range,
+    zoom_range = augmentation_params$zoom_range,
+    horizontal_flip = augmentation_params$horizontal_flip,
+    fill_mode = augmentation_params$fill_mode
+  )
+  
+  train_generator <- flow_images_from_directory(
+    directory = train_dir,
+    generator = train_datagen,
+    target_size = target_size,
+    batch_size = batch_size,
+    class_mode = "categorical",
+    shuffle = TRUE
+  )
+  
+  # Create validation/test generator (no augmentation)
+  test_datagen <- image_data_generator(rescale = 1/255)
+  
+  generators <- list(train = train_generator)
+  
+  if (!is.null(val_dir)) {
+    val_generator <- flow_images_from_directory(
+      directory = val_dir,
+      generator = test_datagen,
+      target_size = target_size,
+      batch_size = batch_size,
+      class_mode = "categorical",
+      shuffle = FALSE
+    )
+    generators$validation <- val_generator
+  }
+  
+  if (!is.null(test_dir)) {
+    test_generator <- flow_images_from_directory(
+      directory = test_dir,
+      generator = test_datagen,
+      target_size = target_size,
+      batch_size = batch_size,
+      class_mode = "categorical",
+      shuffle = FALSE
+    )
+    generators$test <- test_generator
+  }
+  
+  # Print summary
+  cat("Image Data Generators Created:\n")
+  cat("=============================\n")
+  cat(sprintf("Training samples: %d\n", train_generator$n))
+  cat(sprintf("Classes: %s\n", paste(train_generator$class_indices, collapse = ", ")))
+  cat(sprintf("Target size: %dx%d\n", target_size[1], target_size[2]))
+  cat(sprintf("Batch size: %d\n", batch_size))
+  
+  if (!is.null(val_dir) && exists("val_generator")) {
+    cat(sprintf("Validation samples: %d\n", val_generator$n))
+  }
+  
+  return(generators)
+}
+
+# SECTION 6.3: RECURRENT NEURAL NETWORKS (RNNs/LSTMs)
+# ----------------------------------------------------------------------------
+
+#' @title LSTM for Sequence Data
+#' @description Builds LSTM network for sequence prediction
+#' @param timesteps Number of timesteps in input sequences
+#' @param features Number of features per timestep
+#' @param lstm_units Number of LSTM units
+#' @param num_layers Number of LSTM layers
+#' @param bidirectional Whether to use bidirectional LSTM
+#' @param output_dim Output dimension
+#' @param problem_type Problem type: "regression", "classification", "seq2seq"
+#' @return Compiled LSTM model
+
+build_lstm <- function(timesteps, features, lstm_units = 64, num_layers = 2,
+                       bidirectional = FALSE, output_dim = 1,
+                       problem_type = "regression") {
+  
+  require(keras)
+  
+  model <- keras_model_sequential()
+  
+  # Add LSTM layers
+  for (i in 1:num_layers) {
+    return_sequences <- (i < num_layers)  # Return sequences for all but last layer
+    
+    if (bidirectional) {
+      model %>% layer_bidirectional(
+        layer_lstm(units = lstm_units, 
+                   return_sequences = return_sequences,
+                   recurrent_dropout = 0.2),
+        input_shape = if (i == 1) c(timesteps, features) else NULL
+      )
+    } else {
+      model %>% layer_lstm(
+        units = lstm_units,
+        return_sequences = return_sequences,
+        recurrent_dropout = 0.2,
+        input_shape = if (i == 1) c(timesteps, features) else NULL
+      )
+    }
+    
+    # Add dropout after each LSTM layer
+    if (i < num_layers) {
+      model %>% layer_dropout(rate = 0.3)
+    }
+  }
+  
+  # Add dense layers
+  model %>% 
+    layer_dense(units = 32, activation = "relu") %>%
+    layer_dropout(rate = 0.3) %>%
+    layer_dense(units = 16, activation = "relu")
+  
+  # Output layer
+  if (problem_type == "regression") {
+    model %>% layer_dense(units = output_dim, activation = "linear")
+  } else if (problem_type == "classification") {
+    model %>% layer_dense(units = output_dim, activation = "softmax")
+  } else if (problem_type == "seq2seq") {
+    # For sequence-to-sequence, add repeat vector and another LSTM
+    model %>% layer_repeat_vector(n = timesteps)
+    model %>% layer_lstm(units = lstm_units, return_sequences = TRUE)
+    model %>% layer_time_distributed(layer_dense(units = output_dim))
+  }
+  
+  # Compile model
+  if (problem_type == "regression") {
+    loss <- "mse"
+    metrics <- list("mae")
+  } else if (problem_type == "classification") {
+    loss <- "categorical_crossentropy"
+    metrics <- list("accuracy")
+  } else if (problem_type == "seq2seq") {
+    loss <- "mse"
+    metrics <- list("mae")
+  }
+  
+  model %>% compile(
+    optimizer = optimizer_adam(learning_rate = 0.001),
+    loss = loss,
+    metrics = metrics
+  )
+  
+  cat("LSTM Network Architecture:\n")
+  cat("=========================\n")
+  cat(sprintf("Input shape: (%d, %d)\n", timesteps, features))
+  cat(sprintf("LSTM units: %d\n", lstm_units))
+  cat(sprintf("Number of layers: %d\n", num_layers))
+  cat(sprintf("Bidirectional: %s\n", bidirectional))
+  cat(sprintf("Output dimension: %d\n", output_dim))
+  cat(sprintf("Problem type: %s\n", problem_type))
+  
+  return(model)
+}
+
+#' @title Prepare Sequence Data for LSTM
+#' @description Creates sequences from time series data
+#' @param data Time series data
+#' @param timesteps Number of timesteps per sequence
+#' @param target_col Target column name
+#' @param forecast_horizon Forecast horizon for prediction
+#' @return List of sequences and targets
+
+create_sequences <- function(data, timesteps, target_col = NULL, 
+                             forecast_horizon = 1) {
+  
+  sequences <- list()
+  targets <- list()
+  
+  if (is.null(target_col)) {
+    # Use all columns as features
+    features <- data
+    target_idx <- ncol(data)  # Assume last column is target
+  } else {
+    # Separate features and target
+    features <- data[, !colnames(data) %in% target_col, drop = FALSE]
+    target <- data[[target_col]]
+    target_idx <- NULL
+  }
+  
+  # Convert to matrix for efficiency
+  features_matrix <- as.matrix(features)
+  
+  # Create sequences
+  for (i in 1:(nrow(features_matrix) - timesteps - forecast_horizon + 1)) {
+    # Extract sequence
+    seq_start <- i
+    seq_end <- i + timesteps - 1
+    
+    sequence <- features_matrix[seq_start:seq_end, , drop = FALSE]
+    sequences[[i]] <- sequence
+    
+    # Extract target
+    if (is.null(target_col)) {
+      # Use last column of features
+      target_value <- features_matrix[seq_end + forecast_horizon, target_idx]
+    } else {
+      # Use specified target column
+      target_value <- target[seq_end + forecast_horizon]
+    }
+    
+    targets[[i]] <- target_value
+  }
+  
+  # Convert to arrays
+  x_array <- array(unlist(sequences), 
+                   dim = c(length(sequences), timesteps, ncol(features_matrix)))
+  y_array <- array(unlist(targets), dim = c(length(targets), 1))
+  
+  # Reshape y for classification if needed
+  if (is.factor(targets[[1]]) || is.character(targets[[1]])) {
+    # Convert to one-hot encoding
+    unique_classes <- unique(unlist(targets))
+    y_one_hot <- matrix(0, nrow = length(targets), ncol = length(unique_classes))
+    
+    for (i in 1:length(targets)) {
+      class_idx <- which(unique_classes == targets[[i]])
+      y_one_hot[i, class_idx] <- 1
+    }
+    
+    y_array <- y_one_hot
+    colnames(y_array) <- unique_classes
+  }
+  
+  cat("Sequence Data Prepared:\n")
+  cat("=====================\n")
+  cat(sprintf("Total sequences: %d\n", length(sequences)))
+  cat(sprintf("Sequence length: %d timesteps\n", timesteps))
+  cat(sprintf("Features per timestep: %d\n", ncol(features_matrix)))
+  cat(sprintf("Forecast horizon: %d\n", forecast_horizon))
+  
+  if (!is.null(target_col)) {
+    cat(sprintf("Target column: %s\n", target_col))
+  }
+  
+  return(list(
+    x = x_array,
+    y = y_array,
+    timesteps = timesteps,
+    features = colnames(features),
+    target_col = target_col
+  ))
+}
+

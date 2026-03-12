@@ -1,0 +1,558 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 9 of 14
+# Title: Section_009
+# Lines: 5137 - 5686 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 8.1: ADVANCED TIME SERIES DECOMPOSITION
+# ----------------------------------------------------------------------------
+
+#' @title Multiple Seasonal Decomposition
+#' @description Decomposes time series with multiple seasonal patterns
+#' @param time_series Time series data
+#' @param seasonal_periods Vector of seasonal periods
+#' @param method Decomposition method: "mstl", "tbats", "fourier"
+#' @return Multiple seasonal decomposition results
+
+decompose_multiple_seasonal <- function(time_series, 
+                                        seasonal_periods = c(7, 365.25),
+                                        method = "mstl") {
+  
+  require(forecast)
+  require(tsibble)
+  
+  # Convert to time series if needed
+  if (!inherits(time_series, "ts")) {
+    if (length(seasonal_periods) > 0) {
+      ts_data <- ts(time_series, frequency = seasonal_periods[1])
+    } else {
+      ts_data <- ts(time_series)
+    }
+  } else {
+    ts_data <- time_series
+  }
+  
+  decomposition <- list(
+    method = method,
+    seasonal_periods = seasonal_periods,
+    timestamp = Sys.time()
+  )
+  
+  if (method == "mstl") {
+    # Multiple Seasonal-Trend decomposition using LOESS
+    if (requireNamespace("feasts", quietly = TRUE)) {
+      # Convert to tsibble
+      tsibble_data <- as_tsibble(ts_data)
+      
+      # MSTL decomposition
+      mstl_decomp <- tsibble_data %>%
+        model(feasts::MSTL(value ~ trend_window = 13 + 
+                             season(window = c(7, 365.25)))) %>%
+        components()
+      
+      decomposition$trend <- mstl_decomp$trend
+      decomposition$seasonal <- mstl_decomp$seasonal
+      decomposition$remainder <- mstl_decomp$remainder
+      decomposition$seasonal_components <- unique(mstl_decomp$seasonal_name)
+      
+    } else {
+      warning("feasts package not available, using STL instead")
+      method <- "stl"
+    }
+    
+  } else if (method == "tbats") {
+    # TBATS model for multiple seasonality
+    tbats_model <- tbats(ts_data, 
+                         use.arma.errors = TRUE,
+                         use.parallel = TRUE)
+    
+    decomposition$model <- tbats_model
+    decomposition$components <- tbats_model$components
+    decomposition$fitted <- tbats_model$fitted.values
+    decomposition$errors <- tbats_model$errors
+    
+  } else if (method == "fourier") {
+    # Fourier decomposition for multiple seasonality
+    fourier_terms <- list()
+    seasonal_components <- list()
+    
+    for (i in seq_along(seasonal_periods)) {
+      period <- seasonal_periods[i]
+      
+      # Create Fourier terms
+      K <- floor(period/2)
+      fourier_terms[[i]] <- fourier(ts_data, K = K, h = 0)
+      
+      # Fit linear model with Fourier terms
+      if (i == 1) {
+        lm_formula <- as.formula(paste("ts_data ~ ", 
+                                       paste(colnames(fourier_terms[[i]]), 
+                                             collapse = " + ")))
+      } else {
+        lm_formula <- update(lm_formula, 
+                             as.formula(paste(". ~ . + ", 
+                                              paste(colnames(fourier_terms[[i]]), 
+                                                    collapse = " + "))))
+      }
+    }
+    
+    # Fit the model
+    lm_model <- tslm(lm_formula)
+    
+    # Extract components
+    decomposition$model <- lm_model
+    decomposition$fitted <- fitted(lm_model)
+    decomposition$residuals <- residuals(lm_model)
+    decomposition$fourier_terms <- fourier_terms
+  }
+  
+  if (method == "stl") {
+    # Single seasonal STL as fallback
+    if (length(seasonal_periods) > 0) {
+      ts_data <- ts(time_series, frequency = seasonal_periods[1])
+    }
+    
+    stl_decomp <- stl(ts_data, s.window = "periodic", robust = TRUE)
+    
+    decomposition$trend <- stl_decomp$time.series[, "trend"]
+    decomposition$seasonal <- stl_decomp$time.series[, "seasonal"]
+    decomposition$remainder <- stl_decomp$time.series[, "remainder"]
+  }
+  
+  # Calculate variance explained by each component
+  total_variance <- var(as.numeric(ts_data), na.rm = TRUE)
+  
+  if (!is.null(decomposition$trend)) {
+    trend_variance <- var(decomposition$trend, na.rm = TRUE)
+    decomposition$variance_explained$trend <- trend_variance / total_variance * 100
+  }
+  
+  if (!is.null(decomposition$seasonal)) {
+    seasonal_variance <- var(decomposition$seasonal, na.rm = TRUE)
+    decomposition$variance_explained$seasonal <- seasonal_variance / total_variance * 100
+  }
+  
+  if (!is.null(decomposition$remainder)) {
+    remainder_variance <- var(decomposition$remainder, na.rm = TRUE)
+    decomposition$variance_explained$remainder <- remainder_variance / total_variance * 100
+  }
+  
+  # Create visualization data
+  decomposition$plot_data <- data.frame(
+    time = time(ts_data),
+    observed = as.numeric(ts_data),
+    trend = if (!is.null(decomposition$trend)) decomposition$trend else NA,
+    seasonal = if (!is.null(decomposition$seasonal)) decomposition$seasonal else NA,
+    remainder = if (!is.null(decomposition$remainder)) decomposition$remainder else NA
+  )
+  
+  cat("Multiple Seasonal Decomposition:\n")
+  cat("===============================\n")
+  cat(sprintf("Method: %s\n", method))
+  cat(sprintf("Seasonal periods: %s\n", paste(seasonal_periods, collapse = ", ")))
+  cat(sprintf("Time series length: %d\n", length(ts_data)))
+  
+  if (!is.null(decomposition$variance_explained)) {
+    cat("Variance explained:\n")
+    for (component in names(decomposition$variance_explained)) {
+      cat(sprintf("  %s: %.1f%%\n", component, 
+                  decomposition$variance_explained[[component]]))
+    }
+  }
+  
+  return(decomposition)
+}
+
+#' @title Time Series Feature Extraction
+#' @description Extracts comprehensive features from time series
+#' @param time_series Time series data
+#' @param window_size Rolling window size for feature extraction
+#' @return Time series feature matrix
+
+extract_timeseries_features <- function(time_series, window_size = NULL) {
+  
+  require(tsfeatures)
+  require(zoo)
+  
+  # Convert to numeric vector
+  if (inherits(time_series, "ts")) {
+    ts_values <- as.numeric(time_series)
+    ts_frequency <- frequency(time_series)
+  } else {
+    ts_values <- as.numeric(time_series)
+    ts_frequency <- 1
+  }
+  
+  # Remove NA values
+  ts_values <- na.omit(ts_values)
+  
+  # Set default window size
+  if (is.null(window_size)) {
+    window_size <- min(30, length(ts_values) %/% 10)
+  }
+  
+  features <- list()
+  
+  # Basic statistical features
+  features$basic <- c(
+    length = length(ts_values),
+    mean = mean(ts_values, na.rm = TRUE),
+    median = median(ts_values, na.rm = TRUE),
+    sd = sd(ts_values, na.rm = TRUE),
+    var = var(ts_values, na.rm = TRUE),
+    min = min(ts_values, na.rm = TRUE),
+    max = max(ts_values, na.rm = TRUE),
+    range = diff(range(ts_values, na.rm = TRUE)),
+    iqr = IQR(ts_values, na.rm = TRUE),
+    skewness = moments::skewness(ts_values, na.rm = TRUE),
+    kurtosis = moments::kurtosis(ts_values, na.rm = TRUE),
+    cv = sd(ts_values, na.rm = TRUE) / mean(ts_values, na.rm = TRUE) * 100
+  )
+  
+  # Time series specific features
+  if (length(ts_values) > 1) {
+    # Autocorrelation features
+    acf_values <- acf(ts_values, plot = FALSE, na.action = na.pass)
+    pacf_values <- pacf(ts_values, plot = FALSE, na.action = na.pass)
+    
+    features$autocorrelation <- c(
+      acf1 = acf_values$acf[2],
+      acf5 = mean(acf_values$acf[2:6], na.rm = TRUE),
+      acf10 = mean(acf_values$acf[2:11], na.rm = TRUE),
+      pacf1 = pacf_values$acf[1],
+      pacf5 = mean(pacf_values$acf[1:5], na.rm = TRUE)
+    )
+    
+    # Unit root tests
+    if (length(ts_values) > 10) {
+      adf_test <- try(tseries::adf.test(ts_values, alternative = "stationary"), 
+                      silent = TRUE)
+      if (!inherits(adf_test, "try-error")) {
+        features$stationarity <- c(
+          adf_statistic = adf_test$statistic,
+          adf_pvalue = adf_test$p.value,
+          is_stationary = adf_test$p.value < 0.05
+        )
+      }
+    }
+    
+    # Seasonality test
+    if (ts_frequency > 1 && length(ts_values) > 2 * ts_frequency) {
+      seasonal_strength <- try(
+        forecast::tsfeatures::strength(ts(ts_values, frequency = ts_frequency)),
+        silent = TRUE
+      )
+      if (!inherits(seasonal_strength, "try-error")) {
+        features$seasonality <- c(
+          seasonal_strength = seasonal_strength,
+          has_seasonality = seasonal_strength > 0.5
+        )
+      }
+    }
+    
+    # Entropy and complexity
+    features$complexity <- c(
+      entropy = entropy::entropy(ts_values),
+      hurst = if (length(ts_values) > 100) 
+        pracma::hurstexp(ts_values)$Hs else NA,
+      lyapunov = if (length(ts_values) > 50) 
+        try(nonlinearTseries::maxLyapunov(ts_values, 
+                                          sampling.period = 1,
+                                          min.embedding.dim = 2,
+                                          max.embedding.dim = 5,
+                                          radius = 1,
+                                          do.plot = FALSE), 
+            silent = TRUE) else NA
+    )
+  }
+  
+  # Rolling window features
+  if (length(ts_values) >= window_size) {
+    roll_mean <- rollmean(ts_values, window_size, na.pad = TRUE, align = "right")
+    roll_sd <- rollapply(ts_values, window_size, sd, na.pad = TRUE, align = "right")
+    roll_min <- rollapply(ts_values, window_size, min, na.pad = TRUE, align = "right")
+    roll_max <- rollapply(ts_values, window_size, max, na.pad = TRUE, align = "right")
+    
+    features$rolling <- c(
+      roll_mean_mean = mean(roll_mean, na.rm = TRUE),
+      roll_sd_mean = mean(roll_sd, na.rm = TRUE),
+      roll_mean_sd = sd(roll_mean, na.rm = TRUE),
+      volatility = mean(roll_sd / abs(roll_mean), na.rm = TRUE) * 100
+    )
+  }
+  
+  # Change point detection
+  if (length(ts_values) > 10) {
+    cpt_mean <- try(changepoint::cpt.mean(ts_values, method = "PELT"), 
+                    silent = TRUE)
+    if (!inherits(cpt_mean, "try-error")) {
+      features$changepoints <- c(
+        n_cpts = length(changepoint::cpts(cpt_mean)),
+        cpt_locations = if (length(changepoint::cpts(cpt_mean)) > 0) 
+          paste(changepoint::cpts(cpt_mean), collapse = ",") else "none"
+      )
+    }
+  }
+  
+  # Trend features
+  if (length(ts_values) > 2) {
+    trend_model <- lm(ts_values ~ seq_along(ts_values))
+    features$trend <- c(
+      trend_slope = coef(trend_model)[2],
+      trend_pvalue = summary(trend_model)$coefficients[2, 4],
+      has_trend = summary(trend_model)$coefficients[2, 4] < 0.05
+    )
+  }
+  
+  # Flatten the features list
+  flat_features <- unlist(features)
+  
+  # Create feature matrix
+  feature_matrix <- matrix(flat_features, nrow = 1, 
+                           dimnames = list(NULL, names(flat_features)))
+  
+  cat("Time Series Feature Extraction:\n")
+  cat("==============================\n")
+  cat(sprintf("Time series length: %d\n", length(ts_values)))
+  cat(sprintf("Features extracted: %d\n", length(flat_features)))
+  cat(sprintf("Window size: %d\n", window_size))
+  
+  return(list(
+    features = flat_features,
+    feature_matrix = feature_matrix,
+    feature_categories = lapply(features, names)
+  ))
+}
+
+# SECTION 8.2: MULTIVARIATE TIME SERIES ANALYSIS
+# ----------------------------------------------------------------------------
+
+#' @title Vector Autoregression (VAR) Modeling
+#' @description Fits VAR model to multivariate time series
+#' @param data Multivariate time series data
+#' @param lag_order VAR lag order (if NULL, selected by information criteria)
+#' @param forecast_horizon Forecast horizon
+#' @return VAR model results and forecasts
+
+fit_var_model <- function(data, lag_order = NULL, forecast_horizon = 12) {
+  
+  require(vars)
+  require(tsDyn)
+  
+  # Ensure data is a time series matrix
+  if (!is.matrix(data) && !is.data.frame(data)) {
+    stop("Data must be a matrix or data frame")
+  }
+  
+  # Convert to time series if needed
+  if (!inherits(data, "ts") && !inherits(data, "mts")) {
+    # Try to determine frequency from column names
+    freq <- 1
+    if (nrow(data) > 365 && any(grepl("date|time", colnames(data), ignore.case = TRUE))) {
+      freq <- 12  # Monthly
+    }
+    data_ts <- ts(data, frequency = freq)
+  } else {
+    data_ts <- data
+  }
+  
+  # Remove any NA values (VAR cannot handle NAs)
+  data_clean <- na.omit(data_ts)
+  
+  # Determine optimal lag order if not specified
+  if (is.null(lag_order)) {
+    lag_selection <- VARselect(data_clean, lag.max = min(10, nrow(data_clean) %/% 10))
+    lag_order <- lag_selection$selection["AIC(n)"]
+    cat(sprintf("Selected lag order by AIC: %d\n", lag_order))
+  }
+  
+  # Fit VAR model
+  var_model <- VAR(data_clean, p = lag_order, type = "const")
+  
+  # Model summary
+  model_summary <- summary(var_model)
+  
+  # Granger causality tests
+  granger_tests <- list()
+  for (i in 1:ncol(data_clean)) {
+    for (j in 1:ncol(data_clean)) {
+      if (i != j) {
+        test <- causality(var_model, cause = colnames(data_clean)[i])
+        granger_tests[[paste(colnames(data_clean)[i], "->", colnames(data_clean)[j])]] <- 
+          test$Granger
+      }
+    }
+  }
+  
+  # Impulse response functions
+  irf_results <- irf(var_model, n.ahead = forecast_horizon, ortho = TRUE)
+  
+  # Forecast variance decomposition
+  fevd_results <- fevd(var_model, n.ahead = forecast_horizon)
+  
+  # Generate forecasts
+  forecasts <- predict(var_model, n.ahead = forecast_horizon)
+  
+  # Model diagnostics
+  residuals <- residuals(var_model)
+  arch_test <- arch.test(var_model)
+  normality_test <- normality.test(var_model, multivariate.only = TRUE)
+  serial_test <- serial.test(var_model, lags.pt = lag_order)
+  
+  # Calculate model performance metrics
+  if (nrow(data_clean) > lag_order + forecast_horizon) {
+    # Create training and testing sets
+    train_size <- nrow(data_clean) - forecast_horizon
+    train_data <- data_clean[1:train_size, ]
+    test_data <- data_clean[(train_size + 1):nrow(data_clean), ]
+    
+    # Fit model on training data
+    train_model <- VAR(train_data, p = lag_order, type = "const")
+    train_forecast <- predict(train_model, n.ahead = forecast_horizon)
+    
+    # Calculate forecast errors
+    forecast_errors <- test_data - sapply(train_forecast$fcst, function(x) x[, "fcst"])
+    
+    performance_metrics <- data.frame(
+      Variable = colnames(data_clean),
+      RMSE = sqrt(colMeans(forecast_errors^2)),
+      MAE = colMeans(abs(forecast_errors)),
+      MAPE = colMeans(abs(forecast_errors / test_data)) * 100,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    performance_metrics <- NULL
+  }
+  
+  results <- list(
+    model = var_model,
+    lag_order = lag_order,
+    model_summary = model_summary,
+    granger_causality = granger_tests,
+    impulse_response = irf_results,
+    variance_decomposition = fevd_results,
+    forecasts = forecasts,
+    residuals = residuals,
+    diagnostics = list(
+      arch_test = arch_test,
+      normality_test = normality_test,
+      serial_correlation = serial_test
+    ),
+    performance = performance_metrics,
+    data = list(
+      original = data_ts,
+      cleaned = data_clean,
+      dimensions = dim(data_clean),
+      variables = colnames(data_clean)
+    )
+  )
+  
+  cat("VAR Model Results:\n")
+  cat("=================\n")
+  cat(sprintf("Variables: %s\n", paste(colnames(data_clean), collapse = ", ")))
+  cat(sprintf("Observations: %d\n", nrow(data_clean)))
+  cat(sprintf("Lag order: %d\n", lag_order))
+  cat(sprintf("Forecast horizon: %d\n", forecast_horizon))
+  
+  if (!is.null(performance_metrics)) {
+    cat("\nForecast Performance:\n")
+    print(performance_metrics)
+  }
+  
+  return(results)
+}
+
+#' @title Dynamic Time Warping for Time Series Comparison
+#' @description Compares time series using Dynamic Time Warping
+#' @param series1 First time series
+#' @param series2 Second time series
+#' @param window_size Sakoe-Chiba band window size
+#' @param distance_metric Distance metric for DTW
+#' @return DTW alignment and distance
+
+compare_timeseries_dtw <- function(series1, series2, window_size = NULL,
+                                   distance_metric = "euclidean") {
+  
+  require(dtw)
+  
+  # Ensure both series are numeric vectors
+  if (is.data.frame(series1) || is.matrix(series1)) {
+    if (ncol(series1) == 1) {
+      series1 <- as.numeric(series1[, 1])
+    } else {
+      stop("series1 must be a single time series")
+    }
+  }
+  
+  if (is.data.frame(series2) || is.matrix(series2)) {
+    if (ncol(series2) == 1) {
+      series2 <- as.numeric(series2[, 1])
+    } else {
+      stop("series2 must be a single time series")
+    }
+  }
+  
+  # Remove NA values
+  series1 <- na.omit(series1)
+  series2 <- na.omit(series2)
+  
+  # Set window size if not provided
+  if (is.null(window_size)) {
+    window_size <- floor(min(length(series1), length(series2)) * 0.1)
+  }
+  
+  # Perform DTW
+  dtw_result <- dtw(series1, series2, 
+                    window.type = "sakoechiba",
+                    window.size = window_size,
+                    distance.only = FALSE,
+                    step.pattern = symmetric2,
+                    dist.method = distance_metric)
+  
+  # Calculate normalized distance
+  normalized_distance <- dtw_result$distance / sqrt(length(series1) * length(series2))
+  
+  # Create alignment visualization data
+  alignment_df <- data.frame(
+    index1 = dtw_result$index1,
+    index2 = dtw_result$index2,
+    series1_value = series1[dtw_result$index1],
+    series2_value = series2[dtw_result$index2]
+  )
+  
+  # Calculate warping path statistics
+  warping_stats <- list(
+    path_length = length(dtw_result$index1),
+    compression_ratio = length(dtw_result$index1) / max(length(series1), length(series2)),
+    mean_step_size = mean(abs(diff(dtw_result$index1) - diff(dtw_result$index2))),
+    max_step_size = max(abs(diff(dtw_result$index1) - diff(dtw_result$index2)))
+  )
+  
+  results <- list(
+    dtw_result = dtw_result,
+    distance = dtw_result$distance,
+    normalized_distance = normalized_distance,
+    window_size = window_size,
+    series_lengths = c(length(series1), length(series2)),
+    alignment = alignment_df,
+    warping_stats = warping_stats,
+    similarity_score = 1 / (1 + normalized_distance)  # Convert distance to similarity
+  )
+  
+  cat("Dynamic Time Warping Results:\n")
+  cat("=============================\n")
+  cat(sprintf("Series 1 length: %d\n", length(series1)))
+  cat(sprintf("Series 2 length: %d\n", length(series2)))
+  cat(sprintf("DTW distance: %.4f\n", dtw_result$distance))
+  cat(sprintf("Normalized distance: %.4f\n", normalized_distance))
+  cat(sprintf("Similarity score: %.4f\n", results$similarity_score))
+  cat(sprintf("Warping path length: %d\n", warping_stats$path_length))
+  cat(sprintf("Compression ratio: %.2f\n", warping_stats$compression_ratio))
+  
+  return(results)
+}
+

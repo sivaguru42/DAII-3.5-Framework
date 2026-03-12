@@ -1,0 +1,61 @@
+
+# DAII 3.5 PRODUCTION FIELD MAPPING CONFIGURATION
+# For DUMAC Investment Intelligence Framework
+
+daii_fields:
+  # COMPANY IDENTIFIERS
+  ticker:
+    expected: "Ticker"
+    alternatives: ["Symbol", "ID_BB_GLOBAL", "Matched_Ticker", "Instr/BB_Code"]
+  
+  # BLOOMBERG DATA FIELDS
+  rd_expense:
+    expected: "R&D Exp"
+    alternatives: ["R.D.Exp", "RD_Expense", "Research_Development"]
+  
+  market_cap:
+    expected: "Mkt Cap"
+    alternatives: ["Mkt.Cap", "MarketCap", "CUR_MKT_CAP"]
+  
+  analyst_rating:
+    expected: "BEst Analyst Rtg"
+    alternatives: ["BEst.Analyst.Rtg", "ANR", "BEST_ANALYST_RATING"]
+  
+  patent_count:
+    expected: "Patents / Trademarks / Copy Rgt"
+    alternatives: ["Patents...Trademarks...Copy.Rgt", "Patent_Count"]
+  
+  news_sentiment:
+    expected: "News Sent"
+    alternatives: ["News.Sent", "NEWS_SENTIMENT"]
+  
+  revenue_growth:
+    expected: "Rev - 1 Yr Gr"
+    alternatives: ["Rev...1.Yr.Gr", "Sales_Growth"]
+  
+  industry:
+    expected: "GICS Ind Grp Name"
+    alternatives: ["GICS.Ind.Grp.Name", "Instr/BB_IndustrySector", "Industry"]
+  
+  # DUMAC PORTFOLIO FIELDS
+  fund_name:
+    expected: "Fund Name"
+    alternatives: ["fund_name", "Fund/Fund Legal Name (2)"]
+  
+  fund_weight:
+    expected: "Long (%LTP)"
+    alternatives: ["fund_weight", "Weight", "Net (%LTP)", "Risk/Long Exposure"]
+  
+  # ADDITIONAL FIELDS
+  position_value:
+    expected: "position_value"
+    alternatives: ["Positions/Base/Notional Market Value (Base)"]
+  
+  shares_held:
+    expected: "shares_held"
+    alternatives: ["Positions/End Quantity"]
+  
+  as_of_date:
+    expected: "as_of_date"
+    alternatives: ["as_of_date", "Position Date"]
+

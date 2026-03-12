@@ -1,0 +1,889 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 6 of 14
+# Title: Section_006
+# Lines: 2938 - 3818 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 5.1: CLASSIFICATION MODELS
+# ----------------------------------------------------------------------------
+
+#' @title Automated Classification Modeling
+#' @description Builds and compares multiple classification models
+#' @param data Input data frame
+#' @param target Target variable (must be factor for classification)
+#' @param models Models to fit: "logistic", "rf", "xgboost", "svm", "knn", "ensemble"
+#' @param metric Evaluation metric: "Accuracy", "Kappa", "ROC", "Sens", "Spec"
+#' @param validation_split Validation split proportion
+#' @param cross_validation K-fold cross-validation
+#' @return Classification results and model comparisons
+
+build_classification_models <- function(data, target, 
+                                        models = c("logistic", "rf", "xgboost", "svm", "knn"),
+                                        metric = "Accuracy",
+                                        validation_split = 0.2,
+                                        cross_validation = 10) {
+  
+  require(caret)
+  require(pROC)
+  require(MLmetrics)
+  
+  # Ensure target is factor
+  if (!is.factor(data[[target]])) {
+    data[[target]] <- as.factor(data[[target]])
+  }
+  
+  # Check for class imbalance
+  class_distribution <- table(data[[target]])
+  imbalance_ratio <- max(class_distribution) / min(class_distribution)
+  
+  if (imbalance_ratio > 10) {
+    warning(sprintf("Severe class imbalance detected (ratio: %.1f:1). Consider using SMOTE or class weights.", imbalance_ratio))
+  }
+  
+  # Split data
+  set.seed(42)
+  train_index <- createDataPartition(data[[target]], p = 1 - validation_split, 
+                                     list = FALSE)
+  train_data <- data[train_index, ]
+  test_data <- data[-train_index, ]
+  
+  # Create control for training
+  ctrl <- trainControl(
+    method = "cv",
+    number = cross_validation,
+    classProbs = TRUE,
+    summaryFunction = ifelse(metric %in% c("ROC", "Sens", "Spec"), 
+                             twoClassSummary, defaultSummary),
+    savePredictions = "final",
+    verboseIter = FALSE
+  )
+  
+  model_results <- list()
+  performance_comparison <- data.frame()
+  roc_curves <- list()
+  
+  # Logistic Regression
+  if ("logistic" %in% models) {
+    cat("Fitting Logistic Regression...\n")
+    logistic_model <- train(
+      as.formula(paste(target, "~ .")),
+      data = train_data,
+      method = "glm",
+      family = "binomial",
+      trControl = ctrl,
+      metric = metric,
+      preProcess = c("center", "scale")
+    )
+    
+    logistic_pred <- predict(logistic_model, test_data)
+    logistic_prob <- predict(logistic_model, test_data, type = "prob")
+    
+    logistic_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = logistic_pred,
+      probabilities = logistic_prob
+    )
+    
+    model_results$logistic <- list(
+      model = logistic_model,
+      predictions = logistic_pred,
+      probabilities = logistic_prob,
+      metrics = logistic_metrics
+    )
+    
+    # ROC curve
+    roc_curves$logistic <- roc(test_data[[target]], logistic_prob[, 2])
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Logistic Regression",
+                                               Accuracy = logistic_metrics$accuracy,
+                                               Precision = logistic_metrics$precision,
+                                               Recall = logistic_metrics$recall,
+                                               F1 = logistic_metrics$f1,
+                                               AUC = logistic_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Random Forest
+  if ("rf" %in% models) {
+    cat("Fitting Random Forest...\n")
+    rf_grid <- expand.grid(mtry = c(2, sqrt(ncol(train_data)-1), 
+                                    (ncol(train_data)-1)/2),
+                           splitrule = "gini",
+                           min.node.size = c(1, 5, 10))
+    
+    rf_model <- train(
+      as.formula(paste(target, "~ .")),
+      data = train_data,
+      method = "ranger",
+      trControl = ctrl,
+      tuneGrid = rf_grid,
+      importance = "permutation",
+      metric = metric,
+      num.trees = 100
+    )
+    
+    rf_pred <- predict(rf_model, test_data)
+    rf_prob <- predict(rf_model, test_data, type = "prob")
+    
+    rf_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = rf_pred,
+      probabilities = rf_prob
+    )
+    
+    model_results$rf <- list(
+      model = rf_model,
+      predictions = rf_pred,
+      probabilities = rf_prob,
+      metrics = rf_metrics,
+      importance = varImp(rf_model)$importance
+    )
+    
+    roc_curves$rf <- roc(test_data[[target]], rf_prob[, 2])
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Random Forest",
+                                               Accuracy = rf_metrics$accuracy,
+                                               Precision = rf_metrics$precision,
+                                               Recall = rf_metrics$recall,
+                                               F1 = rf_metrics$f1,
+                                               AUC = rf_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # XGBoost
+  if ("xgboost" %in% models) {
+    cat("Fitting XGBoost...\n")
+    xgb_grid <- expand.grid(
+      nrounds = c(100, 200),
+      max_depth = c(3, 6, 9),
+      eta = c(0.01, 0.1, 0.3),
+      gamma = c(0, 1),
+      colsample_bytree = c(0.5, 0.8, 1),
+      min_child_weight = c(1, 3, 5),
+      subsample = c(0.5, 0.8, 1)
+    )
+    
+    xgb_model <- train(
+      as.formula(paste(target, "~ .")),
+      data = train_data,
+      method = "xgbTree",
+      trControl = ctrl,
+      tuneGrid = xgb_grid,
+      metric = metric,
+      verbosity = 0
+    )
+    
+    xgb_pred <- predict(xgb_model, test_data)
+    xgb_prob <- predict(xgb_model, test_data, type = "prob")
+    
+    xgb_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = xgb_pred,
+      probabilities = xgb_prob
+    )
+    
+    model_results$xgboost <- list(
+      model = xgb_model,
+      predictions = xgb_pred,
+      probabilities = xgb_prob,
+      metrics = xgb_metrics,
+      importance = varImp(xgb_model)$importance
+    )
+    
+    roc_curves$xgboost <- roc(test_data[[target]], xgb_prob[, 2])
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "XGBoost",
+                                               Accuracy = xgb_metrics$accuracy,
+                                               Precision = xgb_metrics$precision,
+                                               Recall = xgb_metrics$recall,
+                                               F1 = xgb_metrics$f1,
+                                               AUC = xgb_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # SVM
+  if ("svm" %in% models) {
+    cat("Fitting SVM...\n")
+    svm_grid <- expand.grid(C = 10^seq(-3, 3, length = 10),
+                            sigma = 10^seq(-3, 3, length = 10))
+    
+    svm_model <- train(
+      as.formula(paste(target, "~ .")),
+      data = train_data,
+      method = "svmRadial",
+      trControl = ctrl,
+      tuneGrid = svm_grid,
+      metric = metric,
+      preProcess = c("center", "scale")
+    )
+    
+    svm_pred <- predict(svm_model, test_data)
+    svm_prob <- predict(svm_model, test_data, type = "prob")
+    
+    svm_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = svm_pred,
+      probabilities = svm_prob
+    )
+    
+    model_results$svm <- list(
+      model = svm_model,
+      predictions = svm_pred,
+      probabilities = svm_prob,
+      metrics = svm_metrics
+    )
+    
+    roc_curves$svm <- roc(test_data[[target]], svm_prob[, 2])
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "SVM",
+                                               Accuracy = svm_metrics$accuracy,
+                                               Precision = svm_metrics$precision,
+                                               Recall = svm_metrics$recall,
+                                               F1 = svm_metrics$f1,
+                                               AUC = svm_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # K-Nearest Neighbors
+  if ("knn" %in% models) {
+    cat("Fitting KNN...\n")
+    knn_grid <- expand.grid(k = seq(3, 21, by = 2))
+    
+    knn_model <- train(
+      as.formula(paste(target, "~ .")),
+      data = train_data,
+      method = "knn",
+      trControl = ctrl,
+      tuneGrid = knn_grid,
+      metric = metric,
+      preProcess = c("center", "scale")
+    )
+    
+    knn_pred <- predict(knn_model, test_data)
+    knn_prob <- predict(knn_model, test_data, type = "prob")
+    
+    knn_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = knn_pred,
+      probabilities = knn_prob
+    )
+    
+    model_results$knn <- list(
+      model = knn_model,
+      predictions = knn_pred,
+      probabilities = knn_prob,
+      metrics = knn_metrics
+    )
+    
+    roc_curves$knn <- roc(test_data[[target]], knn_prob[, 2])
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "KNN",
+                                               Accuracy = knn_metrics$accuracy,
+                                               Precision = knn_metrics$precision,
+                                               Recall = knn_metrics$recall,
+                                               F1 = knn_metrics$f1,
+                                               AUC = knn_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Ensemble (Voting Classifier)
+  if ("ensemble" %in% models && length(model_results) > 1) {
+    cat("Creating Ensemble Model...\n")
+    
+    # Extract probabilities from all models
+    prob_list <- lapply(model_results, function(x) x$probabilities[, 2])
+    ensemble_prob <- rowMeans(do.call(cbind, prob_list))
+    
+    # Convert to class predictions
+    ensemble_pred <- factor(ifelse(ensemble_prob > 0.5, 
+                                   levels(test_data[[target]])[2], 
+                                   levels(test_data[[target]])[1]),
+                            levels = levels(test_data[[target]]))
+    
+    ensemble_metrics <- calculate_classification_metrics(
+      actual = test_data[[target]],
+      predicted = ensemble_pred,
+      probabilities = data.frame(Class1 = 1 - ensemble_prob, 
+                                 Class2 = ensemble_prob)
+    )
+    
+    model_results$ensemble <- list(
+      predictions = ensemble_pred,
+      probabilities = ensemble_prob,
+      metrics = ensemble_metrics
+    )
+    
+    roc_curves$ensemble <- roc(test_data[[target]], ensemble_prob)
+    
+    performance_comparison <- rbind(performance_comparison,
+                                    data.frame(Model = "Ensemble",
+                                               Accuracy = ensemble_metrics$accuracy,
+                                               Precision = ensemble_metrics$precision,
+                                               Recall = ensemble_metrics$recall,
+                                               F1 = ensemble_metrics$f1,
+                                               AUC = ensemble_metrics$auc,
+                                               stringsAsFactors = FALSE))
+  }
+  
+  # Identify best model based on selected metric
+  if (metric == "Accuracy") {
+    performance_comparison <- performance_comparison %>%
+      arrange(desc(Accuracy))
+  } else if (metric == "AUC") {
+    performance_comparison <- performance_comparison %>%
+      arrange(desc(AUC))
+  } else if (metric == "F1") {
+    performance_comparison <- performance_comparison %>%
+      arrange(desc(F1))
+  }
+  
+  best_model_name <- performance_comparison$Model[1]
+  best_model_key <- tolower(gsub(" ", "_", best_model_name))
+  
+  if (best_model_key %in% names(model_results)) {
+    best_model <- model_results[[best_model_key]]
+  } else {
+    best_model <- model_results[[1]]
+  }
+  
+  # Create ROC curves comparison
+  roc_data <- lapply(names(roc_curves), function(model_name) {
+    roc_obj <- roc_curves[[model_name]]
+    data.frame(
+      Model = model_name,
+      FPR = 1 - roc_obj$specificities,
+      TPR = roc_obj$sensitivities,
+      AUC = auc(roc_obj)
+    )
+  })
+  
+  roc_combined <- do.call(rbind, roc_data)
+  
+  roc_plot <- ggplot(roc_combined, aes(x = FPR, y = TPR, color = Model)) +
+    geom_line(size = 1) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+    labs(title = "ROC Curves Comparison",
+         x = "False Positive Rate (1 - Specificity)",
+         y = "True Positive Rate (Sensitivity)") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+  
+  # Create performance comparison plot
+  if (metric == "Accuracy") {
+    metric_plot <- ggplot(performance_comparison, 
+                          aes(x = reorder(Model, Accuracy), y = Accuracy)) +
+      geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+      geom_text(aes(label = round(Accuracy, 3)), hjust = -0.2, size = 3) +
+      coord_flip() +
+      labs(title = "Model Accuracy Comparison",
+           x = "Model", y = "Accuracy (Higher is Better)") +
+      theme_minimal()
+  } else if (metric == "AUC") {
+    metric_plot <- ggplot(performance_comparison, 
+                          aes(x = reorder(Model, AUC), y = AUC)) +
+      geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+      geom_text(aes(label = round(AUC, 3)), hjust = -0.2, size = 3) +
+      coord_flip() +
+      labs(title = "Model AUC Comparison",
+           x = "Model", y = "AUC (Higher is Better)") +
+      theme_minimal()
+  }
+  
+  # Create confusion matrix for best model
+  cm <- confusionMatrix(best_model$predictions, test_data[[target]])
+  
+  cm_plot <- ggplot(as.data.frame(cm$table), 
+                    aes(x = Reference, y = Prediction, fill = Freq)) +
+    geom_tile() +
+    geom_text(aes(label = Freq), color = "white", size = 6) +
+    scale_fill_gradient(low = "lightblue", high = "steelblue") +
+    labs(title = paste("Confusion Matrix -", best_model_name),
+         x = "Actual", y = "Predicted") +
+    theme_minimal()
+  
+  results <- list(
+    models = model_results,
+    performance_comparison = performance_comparison,
+    roc_curves = roc_curves,
+    best_model = list(
+      name = best_model_name,
+      model = if (!is.null(best_model$model)) best_model$model else NULL,
+      predictions = best_model$predictions,
+      metrics = best_model$metrics
+    ),
+    confusion_matrix = cm,
+    test_data = test_data,
+    plots = list(
+      roc_plot = roc_plot,
+      metric_plot = metric_plot,
+      confusion_matrix_plot = cm_plot
+    ),
+    summary = list(
+      target_variable = target,
+      classes = levels(data[[target]]),
+      class_distribution = class_distribution,
+      imbalance_ratio = imbalance_ratio,
+      total_models = length(models),
+      best_model_metric = if (metric == "Accuracy") best_model$metrics$accuracy else
+        if (metric == "AUC") best_model$metrics$auc else
+          best_model$metrics$f1,
+      validation_split = validation_split,
+      cross_validation_folds = cross_validation
+    )
+  )
+  
+  # Print summary
+  cat("\nClassification Modeling Summary:\n")
+  cat("===============================\n")
+  cat(sprintf("Target variable: %s\n", target))
+  cat(sprintf("Classes: %s\n", paste(levels(data[[target]]), collapse = ", ")))
+  cat(sprintf("Class distribution: %s\n", 
+              paste(paste(names(class_distribution), class_distribution, sep = ": "), 
+                    collapse = ", ")))
+  cat(sprintf("Imbalance ratio: %.1f:1\n", imbalance_ratio))
+  cat(sprintf("Training samples: %d\n", nrow(train_data)))
+  cat(sprintf("Testing samples: %d\n", nrow(test_data)))
+  cat(sprintf("Best model: %s\n", best_model_name))
+  cat(sprintf("Best %s: %.4f\n", metric, 
+              if (metric == "Accuracy") best_model$metrics$accuracy else
+                if (metric == "AUC") best_model$metrics$auc else
+                  best_model$metrics$f1))
+  
+  return(results)
+}
+
+#' @title Calculate Classification Metrics
+#' @description Helper function to calculate classification performance metrics
+#' @param actual Actual class labels
+#' @param predicted Predicted class labels
+#' @param probabilities Predicted probabilities
+#' @return List of metrics
+
+calculate_classification_metrics <- function(actual, predicted, probabilities = NULL) {
+  
+  require(MLmetrics)
+  require(pROC)
+  
+  # Ensure factors with same levels
+  if (!is.factor(actual)) actual <- as.factor(actual)
+  if (!is.factor(predicted)) predicted <- as.factor(predicted)
+  
+  # Align levels
+  levels_union <- union(levels(actual), levels(predicted))
+  actual <- factor(actual, levels = levels_union)
+  predicted <- factor(predicted, levels = levels_union)
+  
+  # Calculate confusion matrix
+  cm <- confusionMatrix(predicted, actual)
+  
+  # Basic metrics
+  accuracy <- as.numeric(cm$overall["Accuracy"])
+  precision <- posPredValue(predicted, actual, positive = levels_union[2])
+  recall <- sensitivity(predicted, actual, positive = levels_union[2])
+  specificity <- specificity(predicted, actual, positive = levels_union[2])
+  f1 <- (2 * precision * recall) / (precision + recall)
+  
+  # AUC if probabilities provided
+  auc_score <- NA
+  if (!is.null(probabilities)) {
+    if (ncol(probabilities) == 2) {
+      # Binary classification
+      auc_score <- auc(actual, probabilities[, 2])
+    } else if (ncol(probabilities) > 2) {
+      # Multiclass - one-vs-rest average
+      auc_scores <- sapply(1:ncol(probabilities), function(i) {
+        binary_actual <- as.numeric(actual == colnames(probabilities)[i])
+        auc(binary_actual, probabilities[, i])
+      })
+      auc_score <- mean(auc_scores, na.rm = TRUE)
+    }
+  }
+  
+  # Calculate additional metrics
+  kappa <- as.numeric(cm$overall["Kappa"])
+  mcc <- MLmetrics::MCC(y_true = actual, y_pred = predicted)
+  logloss <- if (!is.null(probabilities)) {
+    MLmetrics::LogLoss(y_pred = as.matrix(probabilities), 
+                       y_true = model.matrix(~ actual - 1))
+  } else {
+    NA
+  }
+  
+  # Class-specific metrics
+  if (length(levels_union) == 2) {
+    # Binary classification
+    tn <- cm$table[1, 1]
+    fp <- cm$table[1, 2]
+    fn <- cm$table[2, 1]
+    tp <- cm$table[2, 2]
+    
+    # Additional binary metrics
+    fpr <- fp / (fp + tn)
+    fnr <- fn / (fn + tp)
+    ppv <- tp / (tp + fp)  # Positive Predictive Value
+    npv <- tn / (tn + fn)  # Negative Predictive Value
+  } else {
+    # Multiclass - use macro averages
+    fpr <- NA
+    fnr <- NA
+    ppv <- NA
+    npv <- NA
+  }
+  
+  return(list(
+    accuracy = accuracy,
+    precision = precision,
+    recall = recall,
+    specificity = specificity,
+    f1 = f1,
+    auc = auc_score,
+    kappa = kappa,
+    mcc = mcc,
+    logloss = logloss,
+    confusion_matrix = cm$table,
+    fpr = fpr,
+    fnr = fnr,
+    ppv = ppv,
+    npv = npv
+  ))
+}
+
+# SECTION 5.2: CLUSTERING ALGORITHMS
+# ----------------------------------------------------------------------------
+
+#' @title Comprehensive Clustering Analysis
+#' @description Performs multiple clustering algorithms and evaluates results
+#' @param data Input data frame (numeric columns only)
+#' @param methods Clustering methods: "kmeans", "hierarchical", "dbscan", "gmm"
+#' @param max_clusters Maximum number of clusters to try
+#' @param scale_data Whether to scale data before clustering
+#' @return Clustering results and evaluation
+
+perform_clustering <- function(data, methods = c("kmeans", "hierarchical", "dbscan"),
+                               max_clusters = 10, scale_data = TRUE) {
+  
+  require(cluster)
+  require(dbscan)
+  require(mclust)
+  require(factoextra)
+  
+  # Select numeric columns
+  numeric_data <- data[, sapply(data, is.numeric), drop = FALSE]
+  
+  if (ncol(numeric_data) < 2) {
+    warning("Need at least 2 numeric columns for clustering")
+    return(NULL)
+  }
+  
+  # Scale data if requested
+  if (scale_data) {
+    scaled_data <- scale(numeric_data)
+  } else {
+    scaled_data <- as.matrix(numeric_data)
+  }
+  
+  # Remove any remaining NA values
+  scaled_data <- scaled_data[complete.cases(scaled_data), ]
+  
+  clustering_results <- list()
+  evaluation_metrics <- data.frame()
+  
+  # K-Means Clustering
+  if ("kmeans" %in% methods) {
+    cat("Performing K-Means clustering...\n")
+    
+    # Determine optimal k using elbow method
+    wss <- sapply(1:max_clusters, function(k) {
+      kmeans(scaled_data, centers = k, nstart = 25)$tot.withinss
+    })
+    
+    # Calculate elbow point
+    elbow_point <- which.min(sapply(2:max_clusters, function(i) {
+      abs((wss[i] - wss[i-1]) / (wss[i-1] - wss[max(1, i-2)]))
+    })) + 1
+    
+    # Perform clustering with optimal k
+    kmeans_result <- kmeans(scaled_data, centers = elbow_point, nstart = 25)
+    
+    clustering_results$kmeans <- list(
+      clusters = kmeans_result$cluster,
+      centers = kmeans_result$centers,
+      withinss = kmeans_result$withinss,
+      tot.withinss = kmeans_result$tot.withinss,
+      betweenss = kmeans_result$betweenss,
+      size = kmeans_result$size,
+      optimal_k = elbow_point,
+      wss = wss
+    )
+    
+    # Calculate silhouette score
+    if (elbow_point > 1) {
+      sil_score <- silhouette(kmeans_result$cluster, dist(scaled_data))
+      clustering_results$kmeans$silhouette <- mean(sil_score[, 3])
+    }
+  }
+  
+  # Hierarchical Clustering
+  if ("hierarchical" %in% methods) {
+    cat("Performing Hierarchical clustering...\n")
+    
+    # Calculate distance matrix
+    dist_matrix <- dist(scaled_data)
+    
+    # Perform hierarchical clustering
+    hc_result <- hclust(dist_matrix, method = "ward.D2")
+    
+    # Determine optimal number of clusters
+    hc_silhouette <- sapply(2:max_clusters, function(k) {
+      clusters <- cutree(hc_result, k)
+      sil <- silhouette(clusters, dist_matrix)
+      mean(sil[, 3])
+    })
+    
+    optimal_k_hc <- which.max(hc_silhouette) + 1
+    
+    # Cut tree at optimal k
+    hc_clusters <- cutree(hc_result, k = optimal_k_hc)
+    
+    clustering_results$hierarchical <- list(
+      clusters = hc_clusters,
+      dendrogram = hc_result,
+      optimal_k = optimal_k_hc,
+      silhouette_scores = hc_silhouette,
+      silhouette = max(hc_silhouette)
+    )
+  }
+  
+  # DBSCAN Clustering
+  if ("dbscan" %in% methods) {
+    cat("Performing DBSCAN clustering...\n")
+    
+    # Determine optimal eps using k-nearest neighbor distance
+    k <- 4  # minPts - 1
+    k_dist <- kNNdist(scaled_data, k = k)
+    k_dist_sorted <- sort(k_dist)
+    
+    # Find elbow in k-distance plot
+    elbow_idx <- which.max(diff(diff(k_dist_sorted))) + 1
+    eps_optimal <- k_dist_sorted[elbow_idx]
+    
+    # Perform DBSCAN
+    dbscan_result <- dbscan(scaled_data, eps = eps_optimal, minPts = k + 1)
+    
+    clustering_results$dbscan <- list(
+      clusters = dbscan_result$cluster,
+      eps = eps_optimal,
+      minPts = k + 1,
+      noise_points = sum(dbscan_result$cluster == 0),
+      cluster_count = length(unique(dbscan_result$cluster)) - 
+        ifelse(0 %in% dbscan_result$cluster, 1, 0),
+      k_distances = k_dist_sorted
+    )
+    
+    # Calculate silhouette (excluding noise points)
+    non_noise <- dbscan_result$cluster != 0
+    if (sum(non_noise) > 1 && length(unique(dbscan_result$cluster[non_noise])) > 1) {
+      sil_score <- silhouette(dbscan_result$cluster[non_noise], 
+                              dist(scaled_data[non_noise, ]))
+      clustering_results$dbscan$silhouette <- mean(sil_score[, 3])
+    }
+  }
+  
+  # Gaussian Mixture Models
+  if ("gmm" %in% methods) {
+    cat("Performing Gaussian Mixture Model clustering...\n")
+    
+    # Fit GMM with BIC for model selection
+    gmm_result <- Mclust(scaled_data, G = 1:max_clusters, 
+                         verbose = FALSE)
+    
+    clustering_results$gmm <- list(
+      clusters = gmm_result$classification,
+      model = gmm_result$modelName,
+      optimal_k = gmm_result$G,
+      bic = gmm_result$BIC,
+      parameters = gmm_result$parameters
+    )
+    
+    # Calculate silhouette score
+    if (gmm_result$G > 1) {
+      sil_score <- silhouette(gmm_result$classification, dist(scaled_data))
+      clustering_results$gmm$silhouette <- mean(sil_score[, 3])
+    }
+  }
+  
+  # Evaluate and compare clustering results
+  for (method in names(clustering_results)) {
+    clusters <- clustering_results[[method]]$clusters
+    
+    # Skip if only one cluster or all noise
+    unique_clusters <- unique(clusters)
+    if (length(unique_clusters) <= 1 || 
+        (0 %in% unique_clusters && length(unique_clusters) == 1)) {
+      next
+    }
+    
+    # Calculate evaluation metrics
+    if (length(unique_clusters) > 1) {
+      # Silhouette score
+      sil <- silhouette(clusters, dist(scaled_data))
+      sil_score <- mean(sil[, 3])
+      
+      # Davies-Bouldin Index (lower is better)
+      if (method != "dbscan" || sum(clusters != 0) > 1) {
+        db_index <- clValid::davies.bouldin(scaled_data, clusters)
+      } else {
+        db_index <- NA
+      }
+      
+      # Calinski-Harabasz Index (higher is better)
+      ch_index <- fpc::calinhara(scaled_data, clusters)
+      
+      # Dunn Index (higher is better)
+      dunn_index <- clValid::dunn(dist(scaled_data), clusters)
+      
+      evaluation_metrics <- rbind(evaluation_metrics,
+                                  data.frame(Method = method,
+                                             Clusters = length(unique_clusters),
+                                             Silhouette = sil_score,
+                                             Davies_Bouldin = db_index,
+                                             Calinski_Harabasz = ch_index,
+                                             Dunn_Index = dunn_index,
+                                             stringsAsFactors = FALSE))
+    }
+  }
+  
+  # Identify best clustering method
+  if (nrow(evaluation_metrics) > 0) {
+    # Normalize metrics for comparison
+    eval_norm <- evaluation_metrics
+    
+    # Higher is better: Silhouette, Calinski-Harabasz, Dunn
+    # Lower is better: Davies-Bouldin
+    
+    # Create composite score
+    eval_norm$Composite_Score <- 
+      scale(eval_norm$Silhouette, center = FALSE) +
+      scale(eval_norm$Calinski_Harabasz, center = FALSE) +
+      scale(eval_norm$Dunn_Index, center = FALSE) -
+      scale(eval_norm$Davies_Bouldin, center = FALSE)
+    
+    eval_norm <- eval_norm[order(eval_norm$Composite_Score, decreasing = TRUE), ]
+    
+    best_method <- eval_norm$Method[1]
+    best_clusters <- clustering_results[[best_method]]
+  } else {
+    best_method <- NULL
+    best_clusters <- NULL
+  }
+  
+  # Create visualization plots
+  plots <- list()
+  
+  # PCA plot for clustering visualization
+  pca_result <- prcomp(scaled_data, scale. = FALSE)
+  pca_df <- data.frame(
+    PC1 = pca_result$x[, 1],
+    PC2 = pca_result$x[, 2]
+  )
+  
+  # Add cluster assignments from each method
+  for (method in names(clustering_results)) {
+    if (method %in% evaluation_metrics$Method) {
+      pca_df[[paste0("Cluster_", method)]] <- as.factor(clustering_results[[method]]$clusters)
+    }
+  }
+  
+  # Create cluster plots for each method
+  for (method in names(clustering_results)) {
+    if (method %in% evaluation_metrics$Method) {
+      cluster_col <- paste0("Cluster_", method)
+      
+      plots[[paste0(method, "_plot")]] <- ggplot(pca_df, 
+                                                 aes(x = PC1, y = PC2, 
+                                                     color = .data[[cluster_col]])) +
+        geom_point(alpha = 0.6, size = 2) +
+        labs(title = paste(method, "Clustering"),
+             x = "Principal Component 1",
+             y = "Principal Component 2",
+             color = "Cluster") +
+        theme_minimal() +
+        theme(legend.position = "right")
+    }
+  }
+  
+  # Create silhouette plot for best method
+  if (!is.null(best_method)) {
+    sil <- silhouette(clustering_results[[best_method]]$clusters, dist(scaled_data))
+    
+    plots$silhouette_plot <- fviz_silhouette(sil) +
+      labs(title = paste("Silhouette Plot -", best_method)) +
+      theme_minimal()
+  }
+  
+  # Create evaluation metrics comparison plot
+  if (nrow(evaluation_metrics) > 1) {
+    eval_melt <- evaluation_metrics %>%
+      select(Method, Silhouette, Calinski_Harabasz, Dunn_Index) %>%
+      pivot_longer(cols = -Method, names_to = "Metric", values_to = "Value")
+    
+    plots$metrics_comparison <- ggplot(eval_melt, 
+                                       aes(x = Method, y = Value, fill = Metric)) +
+      geom_bar(stat = "identity", position = "dodge") +
+      labs(title = "Clustering Evaluation Metrics Comparison",
+           x = "Method", y = "Value") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1),
+            legend.position = "bottom")
+  }
+  
+  results <- list(
+    clustering_results = clustering_results,
+    evaluation_metrics = evaluation_metrics,
+    best_method = best_method,
+    best_clusters = best_clusters,
+    scaled_data = scaled_data,
+    plots = plots,
+    summary = list(
+      data_points = nrow(scaled_data),
+      dimensions = ncol(scaled_data),
+      scale_data = scale_data,
+      methods_tried = methods,
+      best_method_silhouette = if (!is.null(best_method)) 
+        evaluation_metrics$Silhouette[evaluation_metrics$Method == best_method] else NA
+    )
+  )
+  
+  # Print summary
+  cat("\nClustering Analysis Summary:\n")
+  cat("===========================\n")
+  cat(sprintf("Data points: %d\n", nrow(scaled_data)))
+  cat(sprintf("Dimensions: %d\n", ncol(scaled_data)))
+  cat(sprintf("Methods tried: %s\n", paste(methods, collapse = ", ")))
+  
+  if (!is.null(best_method)) {
+    cat(sprintf("\nBest method: %s\n", best_method))
+    cat(sprintf("Number of clusters: %d\n", 
+                length(unique(clustering_results[[best_method]]$clusters))))
+    cat(sprintf("Silhouette score: %.4f\n", 
+                evaluation_metrics$Silhouette[evaluation_metrics$Method == best_method]))
+    
+    if (best_method == "dbscan") {
+      cat(sprintf("Noise points: %d (%.1f%%)\n",
+                  clustering_results$dbscan$noise_points,
+                  clustering_results$dbscan$noise_points / nrow(scaled_data) * 100))
+    }
+  }
+  
+  return(results)
+}
+

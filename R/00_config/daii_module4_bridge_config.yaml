@@ -1,0 +1,6 @@
+rd_intensity_score: R_D_Score
+analyst_coverage_score: Analyst_Coverage_Score
+patent_intensity_score: Patent_Score
+news_intensity_score: News_Score
+growth_intensity_score: Growth_Score
+daii_3_5_score: DAII_3_5_Score

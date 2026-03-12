@@ -1,0 +1,749 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 2 of 14
+# Title: Section_002
+# Lines: 104 - 844 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 1.1: DATA VALIDATION & INTEGRITY
+# ----------------------------------------------------------------------------
+
+#' @title Comprehensive Data Validator
+#' @description Validates dataset structure, types, and integrity
+#' @param data Input data frame
+#' @param schema Optional schema definition for validation
+#' @param checks Types of checks to perform
+#' @return Validation report with issues and recommendations
+
+validate_data <- function(data, schema = NULL, 
+                          checks = c("structure", "types", "completeness", 
+                                     "range", "consistency", "uniqueness")) {
+  
+  validation_report <- list(
+    timestamp = Sys.time(),
+    data_dimensions = dim(data),
+    checks_performed = checks,
+    issues = list(),
+    summary = list()
+  )
+  
+  # Structure validation
+  if ("structure" %in% checks) {
+    validation_report$structure <- list(
+      is_data_frame = is.data.frame(data),
+      has_rows = nrow(data) > 0,
+      has_columns = ncol(data) > 0,
+      row_count = nrow(data),
+      column_count = ncol(data)
+    )
+    
+    if (!validation_report$structure$is_data_frame) {
+      validation_report$issues$structure <- "Input is not a data frame"
+    }
+  }
+  
+  # Type validation
+  if ("types" %in% checks) {
+    type_summary <- sapply(data, class)
+    validation_report$type_summary <- table(type_summary)
+    
+    # Check for problematic types
+    char_cols <- names(data)[sapply(data, is.character)]
+    if (length(char_cols) > 0) {
+      validation_report$issues$character_columns <- char_cols
+    }
+  }
+  
+  # Completeness check (missing values)
+  if ("completeness" %in% checks) {
+    na_counts <- colSums(is.na(data))
+    na_percentage <- na_counts / nrow(data) * 100
+    
+    validation_report$completeness <- data.frame(
+      column = names(na_counts),
+      na_count = na_counts,
+      na_percentage = na_percentage,
+      stringsAsFactors = FALSE
+    ) %>%
+      arrange(desc(na_percentage))
+    
+    high_na_cols <- validation_report$completeness %>%
+      filter(na_percentage > 30) %>%
+      pull(column)
+    
+    if (length(high_na_cols) > 0) {
+      validation_report$issues$high_missing_values <- high_na_cols
+    }
+  }
+  
+  # Range validation for numeric columns
+  if ("range" %in% checks) {
+    numeric_cols <- names(data)[sapply(data, is.numeric)]
+    
+    if (length(numeric_cols) > 0) {
+      range_stats <- data %>%
+        select(all_of(numeric_cols)) %>%
+        summarise(across(everything(), 
+                         list(min = min, max = max, mean = mean, sd = sd),
+                         na.rm = TRUE))
+      
+      validation_report$range_stats <- range_stats
+      
+      # Check for outliers (values beyond 3 SD)
+      outlier_checks <- lapply(numeric_cols, function(col) {
+        col_data <- data[[col]]
+        col_mean <- mean(col_data, na.rm = TRUE)
+        col_sd <- sd(col_data, na.rm = TRUE)
+        outliers <- which(abs(col_data - col_mean) > 3 * col_sd)
+        list(column = col, outlier_count = length(outliers))
+      })
+      
+      validation_report$outlier_summary <- bind_rows(outlier_checks)
+    }
+  }
+  
+  # Uniqueness check
+  if ("uniqueness" %in% checks) {
+    duplicate_rows <- sum(duplicated(data))
+    validation_report$uniqueness <- list(
+      duplicate_rows = duplicate_rows,
+      duplicate_percentage = duplicate_rows / nrow(data) * 100
+    )
+    
+    if (duplicate_rows > 0) {
+      validation_report$issues$duplicates <- duplicate_rows
+    }
+  }
+  
+  # Schema validation if provided
+  if (!is.null(schema)) {
+    validation_report$schema_validation <- validate_against_schema(data, schema)
+  }
+  
+  # Generate summary
+  validation_report$summary <- list(
+    total_issues = length(unlist(validation_report$issues)),
+    critical_issues = sum(sapply(validation_report$issues, length) > 0),
+    validation_status = ifelse(length(unlist(validation_report$issues)) == 0,
+                               "PASS", "REVIEW_NEEDED")
+  )
+  
+  class(validation_report) <- "daii_validation_report"
+  return(validation_report)
+}
+
+#' @title Smart Data Type Converter
+#' @description Intelligently converts columns to appropriate data types
+#' @param data Input data frame
+#' @param datetime_formats Formats to try for datetime conversion
+#' @return Data frame with optimized types
+
+smart_type_conversion <- function(data, datetime_formats = c("%Y-%m-%d", "%d/%m/%Y", 
+                                                             "%m/%d/%Y", "%Y%m%d")) {
+  
+  converted_data <- data
+  
+  for (col in names(converted_data)) {
+    col_data <- converted_data[[col]]
+    
+    # Skip if already in good format
+    if (is.numeric(col_data) || is.logical(col_data) || 
+        inherits(col_data, "Date") || inherits(col_data, "POSIXt")) {
+      next
+    }
+    
+    # Try to convert to numeric if character looks numeric
+    if (is.character(col_data)) {
+      # Remove common non-numeric characters
+      clean_numeric <- gsub("[$,%]", "", col_data)
+      
+      # Check if it can be converted to numeric
+      numeric_test <- suppressWarnings(as.numeric(clean_numeric))
+      if (mean(is.na(numeric_test)) < 0.3) {  # Less than 30% NAs after conversion
+        converted_data[[col]] <- numeric_test
+        attr(converted_data[[col]], "original_type") <- "character"
+        next
+      }
+      
+      # Try date conversion
+      for (fmt in datetime_formats) {
+        date_test <- as.Date(col_data, format = fmt)
+        if (mean(is.na(date_test)) < 0.3) {
+          converted_data[[col]] <- date_test
+          attr(converted_data[[col]], "original_format") <- fmt
+          break
+        }
+      }
+    }
+    
+    # Convert logical strings
+    if (is.character(col_data)) {
+      logical_test <- tolower(col_data) %in% c("true", "false", "yes", "no", "1", "0")
+      if (all(logical_test, na.rm = TRUE)) {
+        converted_data[[col]] <- case_when(
+          tolower(col_data) %in% c("true", "yes", "1") ~ TRUE,
+          tolower(col_data) %in% c("false", "no", "0") ~ FALSE,
+          TRUE ~ NA
+        )
+      }
+    }
+  }
+  
+  # Report conversions
+  conversion_report <- data.frame(
+    column = names(data),
+    original_type = sapply(data, class),
+    new_type = sapply(converted_data, class),
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(changed = original_type != new_type)
+  
+  attr(converted_data, "conversion_report") <- conversion_report
+  
+  return(converted_data)
+}
+
+# SECTION 1.2: ADVANCED DATA MANIPULATION
+# ----------------------------------------------------------------------------
+
+#' @title Dynamic Feature Engineering
+#' @description Creates multiple feature types based on column characteristics
+#' @param data Input data frame
+#' @param target_column Optional target for supervised feature engineering
+#' @param max_cardinality Maximum unique values for categorical encoding
+#' @return List containing transformed data and feature metadata
+
+engineer_features <- function(data, target_column = NULL, max_cardinality = 50) {
+  
+  features_metadata <- list(
+    timestamp = Sys.time(),
+    original_dimensions = dim(data),
+    transformations_applied = list()
+  )
+  
+  # Create copy for transformations
+  transformed_data <- data
+  
+  # Identify column types
+  numeric_cols <- names(data)[sapply(data, is.numeric)]
+  categorical_cols <- names(data)[sapply(data, is.character) | sapply(data, is.factor)]
+  date_cols <- names(data)[sapply(data, function(x) inherits(x, "Date") | inherits(x, "POSIXt"))]
+  
+  # Numeric transformations
+  if (length(numeric_cols) > 0) {
+    for (col in numeric_cols) {
+      col_data <- data[[col]]
+      
+      # Skip if too many missing values
+      if (mean(is.na(col_data)) > 0.5) next
+      
+      # Apply transformations
+      transformed_data[[paste0(col, "_log")]] <- log1p(col_data)
+      transformed_data[[paste0(col, "_sqrt")]] <- sqrt(col_data)
+      transformed_data[[paste0(col, "_squared")]] <- col_data^2
+      transformed_data[[paste0(col, "_cubed")]] <- col_data^3
+      transformed_data[[paste0(col, "_scaled")]] <- scale(col_data)
+      transformed_data[[paste0(col, "_rank")]] <- rank(col_data, na.last = "keep")
+      
+      # Binning
+      transformed_data[[paste0(col, "_bin_5")]] <- cut(col_data, breaks = 5)
+      transformed_data[[paste0(col, "_bin_q")]] <- cut(col_data, 
+                                                       breaks = quantile(col_data, 
+                                                                         probs = seq(0, 1, 0.2), 
+                                                                         na.rm = TRUE))
+      
+      features_metadata$transformations_applied$numeric <- c(
+        features_metadata$transformations_applied$numeric, col)
+    }
+  }
+  
+  # Categorical transformations
+  if (length(categorical_cols) > 0) {
+    for (col in categorical_cols) {
+      col_data <- data[[col]]
+      unique_count <- length(unique(col_data))
+      
+      # Skip high cardinality columns
+      if (unique_count > max_cardinality) next
+      
+      # Frequency encoding
+      freq_table <- table(col_data) / length(col_data)
+      transformed_data[[paste0(col, "_freq")]] <- freq_table[col_data]
+      
+      # Target encoding (if target provided)
+      if (!is.null(target_column) && is.numeric(data[[target_column]])) {
+        target_mean <- tapply(data[[target_column]], col_data, mean, na.rm = TRUE)
+        transformed_data[[paste0(col, "_target_mean")]] <- target_mean[col_data]
+      }
+      
+      features_metadata$transformations_applied$categorical <- c(
+        features_metadata$transformations_applied$categorical, col)
+    }
+  }
+  
+  # Date transformations
+  if (length(date_cols) > 0) {
+    for (col in date_cols) {
+      col_data <- data[[col]]
+      
+      transformed_data[[paste0(col, "_year")]] <- year(col_data)
+      transformed_data[[paste0(col, "_month")]] <- month(col_data)
+      transformed_data[[paste0(col, "_day")]] <- day(col_data)
+      transformed_data[[paste0(col, "_weekday")]] <- wday(col_data)
+      transformed_data[[paste0(col, "_week")]] <- week(col_data)
+      transformed_data[[paste0(col, "_quarter")]] <- quarter(col_data)
+      transformed_data[[paste0(col, "_is_weekend")]] <- wday(col_data) %in% c(1, 7)
+      
+      # Time-based features
+      if (inherits(col_data, "POSIXt")) {
+        transformed_data[[paste0(col, "_hour")]] <- hour(col_data)
+        transformed_data[[paste0(col, "_minute")]] <- minute(col_data)
+        transformed_data[[paste0(col, "_second")]] <- second(col_data)
+      }
+      
+      features_metadata$transformations_applied$date <- c(
+        features_metadata$transformations_applied$date, col)
+    }
+  }
+  
+  # Interaction features (for top numeric columns)
+  if (length(numeric_cols) >= 2) {
+    top_numeric <- numeric_cols[1:min(5, length(numeric_cols))]
+    
+    for (i in 1:(length(top_numeric)-1)) {
+      for (j in (i+1):length(top_numeric)) {
+        col1 <- top_numeric[i]
+        col2 <- top_numeric[j]
+        
+        transformed_data[[paste0(col1, "_x_", col2)]] <- 
+          data[[col1]] * data[[col2]]
+        transformed_data[[paste0(col1, "_div_", col2)]] <- 
+          data[[col1]] / (data[[col2]] + 1e-10)  # Avoid division by zero
+        
+        features_metadata$transformations_applied$interactions <- c(
+          features_metadata$transformations_applied$interactions,
+          paste(col1, col2, sep = "_x_"))
+      }
+    }
+  }
+  
+  # Polynomial features for top 3 numeric columns
+  if (length(numeric_cols) >= 3) {
+    for (col in numeric_cols[1:3]) {
+      for (degree in 2:3) {
+        transformed_data[[paste0(col, "_poly", degree)]] <- data[[col]]^degree
+      }
+    }
+  }
+  
+  features_metadata$final_dimensions <- dim(transformed_data)
+  features_metadata$features_created <- ncol(transformed_data) - ncol(data)
+  
+  return(list(
+    data = transformed_data,
+    metadata = features_metadata
+  ))
+}
+
+# SECTION 1.3: PERFORMANCE OPTIMIZATION
+# ----------------------------------------------------------------------------
+
+#' @title Memory Optimization for Large Datasets
+#' @description Reduces memory usage by optimizing column types
+#' @param data Input data frame
+#' @param aggressive Use more aggressive optimization (may lose precision)
+#' @return Optimized data frame with memory usage report
+
+optimize_memory <- function(data, aggressive = FALSE) {
+  
+  initial_memory <- object.size(data)
+  optimized_data <- data
+  
+  for (col in names(optimized_data)) {
+    col_data <- optimized_data[[col]]
+    
+    # Optimize numeric columns
+    if (is.numeric(col_data)) {
+      # Check if integer conversion is possible
+      if (all(col_data %% 1 == 0, na.rm = TRUE)) {
+        range_val <- range(col_data, na.rm = TRUE)
+        
+        if (range_val[1] >= 0) {
+          if (range_val[2] <= 255) {
+            optimized_data[[col]] <- as.integer(col_data)
+          } else if (range_val[2] <= 65535) {
+            optimized_data[[col]] <- as.integer(col_data)
+          }
+        } else {
+          if (range_val[1] >= -128 && range_val[2] <= 127) {
+            optimized_data[[col]] <- as.integer(col_data)
+          } else if (range_val[1] >= -32768 && range_val[2] <= 32767) {
+            optimized_data[[col]] <- as.integer(col_data)
+          }
+        }
+      } else if (aggressive) {
+        # Float precision reduction
+        optimized_data[[col]] <- as.numeric(sprintf("%.4f", col_data))
+      }
+    }
+    
+    # Optimize character columns
+    if (is.character(col_data)) {
+      unique_count <- length(unique(col_data))
+      
+      if (unique_count / length(col_data) < 0.1) {  # Low cardinality
+        optimized_data[[col]] <- as.factor(col_data)
+      } else {
+        # Consider string compression
+        max_len <- max(nchar(col_data), na.rm = TRUE)
+        if (max_len > 100) {
+          # Truncate very long strings
+          optimized_data[[col]] <- substr(col_data, 1, 100)
+        }
+      }
+    }
+    
+    # Optimize logical columns
+    if (is.logical(col_data)) {
+      optimized_data[[col]] <- as.integer(col_data)
+    }
+  }
+  
+  final_memory <- object.size(optimized_data)
+  reduction <- (1 - final_memory / initial_memory) * 100
+  
+  memory_report <- list(
+    initial_memory = format(initial_memory, units = "MB"),
+    final_memory = format(final_memory, units = "MB"),
+    reduction_percentage = round(reduction, 2),
+    optimization_time = Sys.time()
+  )
+  
+  attr(optimized_data, "memory_report") <- memory_report
+  
+  logger::log_info("Memory optimization: {round(reduction, 1)}% reduction achieved")
+  
+  return(optimized_data)
+}
+
+#' @title Parallel Data Processing Wrapper
+#' @description Executes functions in parallel for large datasets
+#' @param data_list List of data chunks or a single data frame
+#' @param func Function to apply
+#' @param combine_method How to combine results ("rbind", "cbind", "list")
+#' @param chunk_size Size of chunks if data is not pre-chunked
+#' @return Combined results from parallel processing
+
+parallel_process <- function(data_list, func, combine_method = "rbind", 
+                             chunk_size = NULL, ...) {
+  
+  require(doParallel)
+  require(foreach)
+  
+  # If single data frame, split into chunks
+  if (is.data.frame(data_list)) {
+    if (is.null(chunk_size)) {
+      chunk_size <- ceiling(nrow(data_list) / (parallel::detectCores() * 2))
+    }
+    
+    n_chunks <- ceiling(nrow(data_list) / chunk_size)
+    data_list <- split(data_list, rep(1:n_chunks, 
+                                      length.out = nrow(data_list)))
+  }
+  
+  # Register parallel backend
+  cl <- parallel::makeCluster(parallel::detectCores() - 1)
+  doParallel::registerDoParallel(cl)
+  
+  # Process in parallel
+  results <- foreach(i = 1:length(data_list), 
+                     .combine = combine_method,
+                     .packages = c("dplyr", "tidyr"),
+                     .export = ls(globalenv())) %dopar% {
+                       func(data_list[[i]], ...)
+                     }
+  
+  # Stop cluster
+  parallel::stopCluster(cl)
+  
+  return(results)
+}
+
+# SECTION 1.4: ERROR HANDLING & LOGGING
+# ----------------------------------------------------------------------------
+
+#' @title Robust Function Execution with Error Recovery
+#' @description Executes function with comprehensive error handling and retry logic
+#' @param expr Expression to execute
+#' @param max_retries Maximum number of retry attempts
+#' @param delay Delay between retries in seconds
+#' @param fallback_value Value to return if all retries fail
+#' @return Result of expression or fallback value
+
+execute_safely <- function(expr, max_retries = 3, delay = 1, 
+                           fallback_value = NULL) {
+  
+  retry_count <- 0
+  last_error <- NULL
+  
+  while (retry_count <= max_retries) {
+    tryCatch({
+      result <- eval(expr)
+      
+      logger::log_success("Execution successful on attempt {retry_count + 1}")
+      
+      # Add execution metadata
+      attr(result, "execution_metadata") <- list(
+        attempts = retry_count + 1,
+        success = TRUE,
+        timestamp = Sys.time(),
+        error = NULL
+      )
+      
+      return(result)
+      
+    }, error = function(e) {
+      last_error <<- e
+      retry_count <<- retry_count + 1
+      
+      logger::log_warn("Attempt {retry_count} failed: {e$message}")
+      
+      if (retry_count <= max_retries) {
+        logger::log_info("Retrying in {delay} seconds...")
+        Sys.sleep(delay)
+      }
+    })
+  }
+  
+  logger::log_error("All {max_retries} attempts failed")
+  
+  # Return fallback with error metadata
+  attr(fallback_value, "execution_metadata") <- list(
+    attempts = max_retries + 1,
+    success = FALSE,
+    timestamp = Sys.time(),
+    error = last_error$message
+  )
+  
+  return(fallback_value)
+}
+
+#' @title Comprehensive Logging System
+#' @description Structured logging with multiple output destinations
+#' @param message Log message
+#' @param level Log level (DEBUG, INFO, WARN, ERROR, FATAL)
+#' @param additional_data Additional data to log
+#' @param console_output Print to console
+#' @param file_output Write to log file
+
+log_event <- function(message, level = "INFO", additional_data = NULL,
+                      console_output = TRUE, file_output = TRUE) {
+  
+  log_entry <- list(
+    timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+    level = level,
+    message = message,
+    data = additional_data,
+    session_info = list(
+      user = Sys.getenv("USER"),
+      r_version = R.version$version.string,
+      platform = R.version$platform
+    )
+  )
+  
+  # Format log line
+  log_line <- sprintf("[%s] %s: %s", 
+                      log_entry$timestamp, 
+                      level, 
+                      message)
+  
+  # Console output
+  if (console_output) {
+    # Color coding for different levels
+    color_codes <- list(
+      DEBUG = "\033[90m",    # Gray
+      INFO = "\033[94m",     # Blue
+      WARN = "\033[93m",     # Yellow
+      ERROR = "\033[91m",    # Red
+      FATAL = "\033[95m"     # Magenta
+    )
+    
+    colored_line <- paste0(color_codes[[level]], log_line, "\033[0m")
+    cat(colored_line, "\n")
+    
+    # Print additional data if provided
+    if (!is.null(additional_data)) {
+      if (is.list(additional_data)) {
+        cat("  Additional data:\n")
+        print(additional_data)
+      } else {
+        cat("  Additional data:", additional_data, "\n")
+      }
+    }
+  }
+  
+  # File output
+  if (file_output) {
+    log_file <- "logs/daii_framework.log"
+    
+    # Ensure directory exists
+    if (!dir.exists(dirname(log_file))) {
+      dir.create(dirname(log_file), recursive = TRUE)
+    }
+    
+    # Write to file
+    write(paste(log_line, collapse = "\n"), 
+          file = log_file, 
+          append = TRUE)
+    
+    # Write structured data as JSON if complex
+    if (!is.null(additional_data) && is.list(additional_data)) {
+      json_data <- jsonlite::toJSON(log_entry, auto_unbox = TRUE, pretty = TRUE)
+      write(json_data, 
+            file = paste0(tools::file_path_sans_ext(log_file), "_structured.json"),
+            append = TRUE)
+    }
+  }
+  
+  # Return log entry for programmatic use
+  invisible(log_entry)
+}
+
+# SECTION 1.5: UTILITY FUNCTIONS
+# ----------------------------------------------------------------------------
+
+#' @title Generate Comprehensive Data Summary
+#' @description Creates detailed summary statistics for all columns
+#' @param data Input data frame
+#' @param include_plots Include visualization plots in output
+#' @return List with summary statistics and optional plots
+
+generate_data_summary <- function(data, include_plots = FALSE) {
+  
+  summary_list <- list(
+    overview = list(
+      dimensions = dim(data),
+      total_cells = nrow(data) * ncol(data),
+      memory_usage = format(object.size(data), units = "MB"),
+      variable_types = table(sapply(data, class))
+    ),
+    
+    column_details = lapply(names(data), function(col) {
+      col_data <- data[[col]]
+      
+      col_summary <- list(
+        name = col,
+        type = class(col_data),
+        na_count = sum(is.na(col_data)),
+        na_percentage = mean(is.na(col_data)) * 100,
+        unique_count = length(unique(col_data)),
+        unique_percentage = length(unique(col_data)) / length(col_data) * 100
+      )
+      
+      # Type-specific statistics
+      if (is.numeric(col_data)) {
+        col_summary$statistics <- list(
+          min = min(col_data, na.rm = TRUE),
+          max = max(col_data, na.rm = TRUE),
+          mean = mean(col_data, na.rm = TRUE),
+          median = median(col_data, na.rm = TRUE),
+          sd = sd(col_data, na.rm = TRUE),
+          skewness = moments::skewness(col_data, na.rm = TRUE),
+          kurtosis = moments::kurtosis(col_data, na.rm = TRUE),
+          q1 = quantile(col_data, 0.25, na.rm = TRUE),
+          q3 = quantile(col_data, 0.75, na.rm = TRUE)
+        )
+        
+        # Outlier detection
+        q1 <- quantile(col_data, 0.25, na.rm = TRUE)
+        q3 <- quantile(col_data, 0.75, na.rm = TRUE)
+        iqr <- q3 - q1
+        outliers <- col_data < (q1 - 1.5 * iqr) | col_data > (q3 + 1.5 * iqr)
+        col_summary$outliers <- sum(outliers, na.rm = TRUE)
+        
+      } else if (is.character(col_data) || is.factor(col_data)) {
+        freq_table <- table(col_data)
+        col_summary$top_values <- head(sort(freq_table, decreasing = TRUE), 10)
+        col_summary$value_distribution <- prop.table(freq_table)
+      } else if (inherits(col_data, "Date") || inherits(col_data, "POSIXt")) {
+        col_summary$date_range <- range(col_data, na.rm = TRUE)
+        col_summary$unique_days = length(unique(as.Date(col_data)))
+      }
+      
+      return(col_summary)
+    }),
+    
+    correlations = if (ncol(data) >= 2) {
+      numeric_data <- data %>% select(where(is.numeric))
+      if (ncol(numeric_data) >= 2) {
+        cor_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+        list(
+          matrix = cor_matrix,
+          high_correlations = which(abs(cor_matrix) > 0.8 & abs(cor_matrix) < 1, 
+                                    arr.ind = TRUE)
+        )
+      } else {
+        NULL
+      }
+    } else {
+      NULL
+    }
+  )
+  
+  # Generate plots if requested
+  if (include_plots) {
+    summary_list$plots <- generate_summary_plots(data)
+  }
+  
+  # Add quality metrics
+  summary_list$quality_metrics <- list(
+    completeness_score = mean(!is.na(data)) * 100,
+    uniqueness_score = 1 - mean(duplicated(data)) * 100,
+    type_consistency = mean(sapply(data, function(x) length(unique(class(x))) == 1)) * 100
+  )
+  
+  class(summary_list) <- "daii_data_summary"
+  return(summary_list)
+}
+
+#' @title Print method for data summary
+#' @description Pretty print for data summary objects
+#' @param x Data summary object
+#' @param ... Additional arguments
+
+print.daii_data_summary <- function(x, ...) {
+  cat("=== DAII Data Summary ===\n\n")
+  
+  cat("Overview:\n")
+  cat(sprintf("  Dimensions: %d rows × %d columns\n", 
+              x$overview$dimensions[1], x$overview$dimensions[2]))
+  cat(sprintf("  Memory: %s\n", x$overview$memory_usage))
+  cat("  Variable types:\n")
+  for (type in names(x$overview$variable_types)) {
+    cat(sprintf("    %s: %d\n", type, x$overview$variable_types[[type]]))
+  }
+  
+  cat("\nQuality Metrics:\n")
+  cat(sprintf("  Completeness: %.1f%%\n", x$quality_metrics$completeness_score))
+  cat(sprintf("  Uniqueness: %.1f%%\n", x$quality_metrics$uniqueness_score))
+  cat(sprintf("  Type Consistency: %.1f%%\n", x$quality_metrics$type_consistency))
+  
+  cat("\nTop 5 Columns Summary:\n")
+  for (i in 1:min(5, length(x$column_details))) {
+    col <- x$column_details[[i]]
+    cat(sprintf("\n  %s (%s):\n", col$name, col$type))
+    cat(sprintf("    Missing: %d (%.1f%%)\n", col$na_count, col$na_percentage))
+    cat(sprintf("    Unique: %d (%.1f%%)\n", col$unique_count, col$unique_percentage))
+    
+    if (is.numeric(col$statistics)) {
+      cat(sprintf("    Range: [%.2f, %.2f]\n", 
+                  col$statistics$min, col$statistics$max))
+      cat(sprintf("    Mean: %.2f, SD: %.2f\n", 
+                  col$statistics$mean, col$statistics$sd))
+    }
+  }
+}
+

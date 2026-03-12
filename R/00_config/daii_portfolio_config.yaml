@@ -1,0 +1,15 @@
+
+portfolio:
+  ticker_col: "ticker"
+  weight_col: "fund_weight"
+  fund_col: "fund_name"
+  date_col: "as_of_date"
+  merge_strategy: "left"
+  metrics:
+    - "weighted_daii_score"
+    - "sector_exposure"
+    - "innovation_concentration"
+  reporting:
+    format: "dataframe"
+    include_details: TRUE
+

@@ -1,0 +1,746 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 11 of 14
+# Title: Section_011
+# Lines: 6561 - 7298 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 10.1: STREAMING DATA PROCESSING
+# ----------------------------------------------------------------------------
+
+#' @title Real-time Data Stream Processor
+#' @description Processes streaming data with windowing and aggregation
+#' @param stream_generator Function that yields data chunks
+#' @param window_size Size of processing window (in records)
+#' @param slide_interval Slide interval for overlapping windows
+#' @param process_function Function to apply to each window
+#' @param output_handler Function to handle processed results
+#' @return Streaming processor with control functions
+
+create_stream_processor <- function(stream_generator, 
+                                    window_size = 100,
+                                    slide_interval = 50,
+                                    process_function = NULL,
+                                    output_handler = NULL) {
+  
+  require(future)
+  require(promises)
+  
+  # Default processing function (basic statistics)
+  if (is.null(process_function)) {
+    process_function <- function(window_data) {
+      list(
+        timestamp = Sys.time(),
+        window_id = attr(window_data, "window_id"),
+        n_records = nrow(window_data),
+        column_means = colMeans(window_data[, sapply(window_data, is.numeric)], na.rm = TRUE),
+        column_sds = apply(window_data[, sapply(window_data, is.numeric)], 2, sd, na.rm = TRUE)
+      )
+    }
+  }
+  
+  # Default output handler (console + file)
+  if (is.null(output_handler)) {
+    output_handler <- function(processed_result) {
+      # Console output
+      cat(sprintf("[%s] Window %s: Processed %d records\n",
+                  processed_result$timestamp,
+                  processed_result$window_id,
+                  processed_result$n_records))
+      
+      # File output
+      log_file <- "logs/stream_processing.log"
+      write(paste(format(processed_result$timestamp), 
+                  processed_result$window_id,
+                  processed_result$n_records,
+                  paste(names(processed_result$column_means), 
+                        round(processed_result$column_means, 3), 
+                        sep = "=", collapse = ";"),
+                  sep = " | "),
+            file = log_file, append = TRUE)
+      
+      return(processed_result)
+    }
+  }
+  
+  # Initialize streaming state
+  streaming_state <- list(
+    window_buffer = list(),
+    window_counter = 0,
+    total_records = 0,
+    start_time = Sys.time(),
+    is_running = FALSE,
+    last_checkpoint = Sys.time()
+  )
+  
+  # Window creation function
+  create_windows <- function(new_data) {
+    windows <- list()
+    
+    if (length(streaming_state$window_buffer) > 0) {
+      # Combine buffer with new data
+      all_data <- rbind(do.call(rbind, streaming_state$window_buffer), new_data)
+    } else {
+      all_data <- new_data
+    }
+    
+    n_rows <- nrow(all_data)
+    
+    # Create sliding windows
+    start_indices <- seq(1, n_rows - window_size + 1, by = slide_interval)
+    
+    for (i in seq_along(start_indices)) {
+      start_idx <- start_indices[i]
+      end_idx <- start_idx + window_size - 1
+      
+      if (end_idx <= n_rows) {
+        window_data <- all_data[start_idx:end_idx, , drop = FALSE]
+        attr(window_data, "window_id") <- paste0("W", streaming_state$window_counter + i)
+        windows[[i]] <- window_data
+      }
+    }
+    
+    # Update buffer with remaining data
+    if (n_rows > window_size) {
+      remaining_start <- tail(start_indices, 1) + slide_interval
+      if (remaining_start <= n_rows) {
+        streaming_state$window_buffer <<- list(all_data[remaining_start:n_rows, , drop = FALSE])
+      } else {
+        streaming_state$window_buffer <<- list()
+      }
+    }
+    
+    streaming_state$window_counter <<- streaming_state$window_counter + length(windows)
+    
+    return(windows)
+  }
+  
+  # Process window asynchronously
+  process_window_async <- function(window_data) {
+    future({
+      tryCatch({
+        result <- process_function(window_data)
+        output_handler(result)
+        return(list(success = TRUE, result = result))
+      }, error = function(e) {
+        return(list(success = FALSE, error = e$message, window_id = attr(window_data, "window_id")))
+      })
+    })
+  }
+  
+  # Main streaming control functions
+  start_stream <- function(max_records = NULL, timeout = NULL) {
+    streaming_state$is_running <<- TRUE
+    streaming_state$start_time <<- Sys.time()
+    
+    cat("Starting stream processing...\n")
+    cat(sprintf("Window size: %d records\n", window_size))
+    cat(sprintf("Slide interval: %d records\n", slide_interval))
+    
+    record_count <- 0
+    futures <- list()
+    
+    while (streaming_state$is_running) {
+      # Check termination conditions
+      if (!is.null(max_records) && record_count >= max_records) {
+        cat(sprintf("Reached maximum records: %d\n", max_records))
+        break
+      }
+      
+      if (!is.null(timeout) && 
+          difftime(Sys.time(), streaming_state$start_time, units = "secs") > timeout) {
+        cat(sprintf("Timeout reached: %d seconds\n", timeout))
+        break
+      }
+      
+      # Get new data from stream
+      new_data <- stream_generator()
+      
+      if (is.null(new_data) || nrow(new_data) == 0) {
+        # No more data, wait a bit
+        Sys.sleep(0.1)
+        next
+      }
+      
+      record_count <- record_count + nrow(new_data)
+      streaming_state$total_records <<- streaming_state$total_records + nrow(new_data)
+      
+      # Create windows from new data
+      windows <- create_windows(new_data)
+      
+      # Process windows asynchronously
+      for (window_data in windows) {
+        future_result <- process_window_async(window_data)
+        futures[[length(futures) + 1]] <- future_result
+        
+        # Limit concurrent futures to avoid memory issues
+        if (length(futures) > 10) {
+          # Check and collect completed futures
+          completed <- sapply(futures, resolved)
+          if (any(completed)) {
+            # Collect results
+            for (i in which(completed)) {
+              result <- value(futures[[i]])
+              if (!result$success) {
+                warning(sprintf("Window %s failed: %s", 
+                                result$window_id, result$error))
+              }
+            }
+            # Remove completed futures
+            futures <- futures[!completed]
+          }
+        }
+      }
+      
+      # Checkpoint every 1000 records
+      if (streaming_state$total_records %% 1000 == 0) {
+        cat(sprintf("Processed %d total records, %d windows created\n",
+                    streaming_state$total_records, streaming_state$window_counter))
+        streaming_state$last_checkpoint <<- Sys.time()
+      }
+    }
+    
+    # Collect remaining futures
+    cat("Collecting remaining results...\n")
+    for (future in futures) {
+      result <- value(future)
+      if (!result$success) {
+        warning(sprintf("Failed window: %s", result$error))
+      }
+    }
+    
+    streaming_state$is_running <<- FALSE
+    
+    return(list(
+      status = "completed",
+      total_records = streaming_state$total_records,
+      total_windows = streaming_state$window_counter,
+      processing_time = difftime(Sys.time(), streaming_state$start_time, units = "secs")
+    ))
+  }
+  
+  stop_stream <- function() {
+    streaming_state$is_running <<- FALSE
+    cat("Stream processing stopped by user.\n")
+  }
+  
+  get_stream_stats <- function() {
+    return(list(
+      is_running = streaming_state$is_running,
+      total_records = streaming_state$total_records,
+      total_windows = streaming_state$window_counter,
+      window_size = window_size,
+      slide_interval = slide_interval,
+      start_time = streaming_state$start_time,
+      last_checkpoint = streaming_state$last_checkpoint
+    ))
+  }
+  
+  # Return control interface
+  return(list(
+    start = start_stream,
+    stop = stop_stream,
+    stats = get_stream_stats,
+    config = list(
+      window_size = window_size,
+      slide_interval = slide_interval,
+      process_function = process_function,
+      output_handler = output_handler
+    )
+  ))
+}
+
+#' @title Real-time Anomaly Detection in Streams
+#' @description Detects anomalies in real-time data streams
+#' @param stream_processor Stream processor object
+#' @param anomaly_detector Function to detect anomalies
+#' @param alert_threshold Threshold for triggering alerts
+#' @return Anomaly detection stream handler
+
+create_anomaly_detection_stream <- function(stream_processor,
+                                            anomaly_detector = NULL,
+                                            alert_threshold = 0.95) {
+  
+  # Default anomaly detector (statistical)
+  if (is.null(anomaly_detector)) {
+    anomaly_detector <- function(window_data, history = NULL) {
+      numeric_data <- window_data[, sapply(window_data, is.numeric), drop = FALSE]
+      
+      if (ncol(numeric_data) == 0) {
+        return(list(anomaly_score = 0, is_anomaly = FALSE))
+      }
+      
+      # Calculate z-scores for each column
+      z_scores <- scale(numeric_data)
+      max_z_score <- max(abs(z_scores), na.rm = TRUE)
+      
+      # Calculate anomaly score (0 to 1)
+      anomaly_score <- pmin(max_z_score / 5, 1)  # Cap at 5 standard deviations
+      
+      # Compare with historical data if available
+      if (!is.null(history) && length(history) > 10) {
+        historical_scores <- sapply(history, function(h) h$anomaly_score)
+        mean_score <- mean(historical_scores, na.rm = TRUE)
+        sd_score <- sd(historical_scores, na.rm = TRUE)
+        
+        if (!is.na(sd_score) && sd_score > 0) {
+          z_score <- (anomaly_score - mean_score) / sd_score
+          is_anomaly <- z_score > 3  # More than 3 SD from historical mean
+        } else {
+          is_anomaly <- anomaly_score > 0.8
+        }
+      } else {
+        is_anomaly <- anomaly_score > 0.8
+      }
+      
+      return(list(
+        anomaly_score = anomaly_score,
+        is_anomaly = is_anomaly,
+        max_z_score = max_z_score,
+        timestamp = Sys.time()
+      ))
+    }
+  }
+  
+  # Initialize anomaly detection state
+  anomaly_state <- list(
+    anomaly_history = list(),
+    alert_history = list(),
+    baseline_stats = NULL,
+    total_windows = 0,
+    anomaly_count = 0
+  )
+  
+  # Enhanced processing function with anomaly detection
+  enhanced_process_function <- function(window_data) {
+    # Get window ID
+    window_id <- attr(window_data, "window_id")
+    
+    # Run anomaly detection
+    anomaly_result <- anomaly_detector(window_data, anomaly_state$anomaly_history)
+    
+    # Update anomaly state
+    anomaly_state$total_windows <<- anomaly_state$total_windows + 1
+    anomaly_state$anomaly_history[[window_id]] <<- anomaly_result
+    
+    # Check for alert
+    if (anomaly_result$is_anomaly) {
+      anomaly_state$anomaly_count <<- anomaly_state$anomaly_count + 1
+      
+      # Create alert
+      alert <- list(
+        alert_id = paste0("ALERT_", length(anomaly_state$alert_history) + 1),
+        window_id = window_id,
+        timestamp = Sys.time(),
+        anomaly_score = anomaly_result$anomaly_score,
+        max_z_score = anomaly_result$max_z_score,
+        window_stats = list(
+          n_records = nrow(window_data),
+          columns = colnames(window_data)
+        )
+      )
+      
+      anomaly_state$alert_history[[alert$alert_id]] <<- alert
+      
+      # Trigger alert handler
+      trigger_alert(alert)
+    }
+    
+    # Calculate window statistics
+    window_stats <- list(
+      window_id = window_id,
+      n_records = nrow(window_data),
+      anomaly_score = anomaly_result$anomaly_score,
+      is_anomaly = anomaly_result$is_anomaly,
+      timestamp = Sys.time()
+    )
+    
+    return(window_stats)
+  }
+  
+  # Alert handler
+  trigger_alert <- function(alert) {
+    # Console alert
+    cat(sprintf("\n🚨 ANOMALY ALERT: %s\n", alert$alert_id))
+    cat(sprintf("   Window: %s\n", alert$window_id))
+    cat(sprintf("   Score: %.4f\n", alert$anomaly_score))
+    cat(sprintf("   Max Z-Score: %.2f\n", alert$max_z_score))
+    cat(sprintf("   Time: %s\n", format(alert$timestamp)))
+    
+    # Log to file
+    alert_log <- "logs/anomaly_alerts.log"
+    alert_entry <- sprintf("%s | %s | Score: %.4f | Z: %.2f | Records: %d",
+                           format(alert$timestamp),
+                           alert$alert_id,
+                           alert$anomaly_score,
+                           alert$max_z_score,
+                           alert$window_stats$n_records)
+    
+    write(alert_entry, file = alert_log, append = TRUE)
+    
+    # Optional: Send email/notification
+    if (file.exists("config/alert_config.yaml")) {
+      try({
+        config <- yaml::read_yaml("config/alert_config.yaml")
+        if (config$send_email) {
+          send_alert_email(alert, config)
+        }
+        if (config$send_slack) {
+          send_alert_slack(alert, config)
+        }
+      }, silent = TRUE)
+    }
+  }
+  
+  # Get anomaly statistics
+  get_anomaly_stats <- function() {
+    if (anomaly_state$total_windows == 0) {
+      return(list(
+        total_windows = 0,
+        anomaly_count = 0,
+        anomaly_rate = 0,
+        recent_alerts = list()
+      ))
+    }
+    
+    # Calculate recent alerts (last 24 hours)
+    recent_alerts <- Filter(function(a) {
+      difftime(Sys.time(), a$timestamp, units = "hours") <= 24
+    }, anomaly_state$alert_history)
+    
+    return(list(
+      total_windows = anomaly_state$total_windows,
+      anomaly_count = anomaly_state$anomaly_count,
+      anomaly_rate = anomaly_state$anomaly_count / anomaly_state$total_windows * 100,
+      recent_alerts = recent_alerts,
+      alert_count_24h = length(recent_alerts)
+    ))
+  }
+  
+  # Update stream processor with enhanced function
+  stream_processor$config$process_function <- enhanced_process_function
+  
+  # Return enhanced stream processor
+  return(list(
+    stream_processor = stream_processor,
+    anomaly_stats = get_anomaly_stats,
+    get_alerts = function() anomaly_state$alert_history,
+    clear_alerts = function() {
+      anomaly_state$alert_history <<- list()
+      anomaly_state$anomaly_count <<- 0
+    }
+  ))
+}
+
+# SECTION 10.2: REAL-TIME DASHBOARDS
+# ----------------------------------------------------------------------------
+
+#' @title Real-time Monitoring Dashboard
+#' @description Creates a real-time dashboard for streaming analytics
+#' @param stream_processor Stream processor object
+#' @param update_interval Update interval in seconds
+#' @param metrics Metrics to display
+#' @return Shiny dashboard application
+
+create_realtime_dashboard <- function(stream_processor,
+                                      update_interval = 5,
+                                      metrics = c("throughput", "anomalies", "latency")) {
+  
+  require(shiny)
+  require(shinydashboard)
+  require(plotly)
+  require(DT)
+  
+  ui <- dashboardPage(
+    dashboardHeader(title = "Real-time Analytics Dashboard"),
+    
+    dashboardSidebar(
+      sidebarMenu(
+        menuItem("Stream Overview", tabName = "overview", icon = icon("stream")),
+        menuItem("Performance Metrics", tabName = "metrics", icon = icon("chart-line")),
+        menuItem("Anomaly Detection", tabName = "anomalies", icon = icon("exclamation-triangle")),
+        menuItem("Data Preview", tabName = "data", icon = icon("database")),
+        menuItem("Controls", tabName = "controls", icon = icon("sliders-h"))
+      ),
+      
+      # Dashboard controls
+      sliderInput("update_interval", "Update Interval (seconds):",
+                  min = 1, max = 60, value = update_interval, step = 1),
+      
+      actionButton("refresh", "Force Refresh", icon = icon("sync")),
+      
+      hr(),
+      
+      # Status indicators
+      verbatimTextOutput("status_info")
+    ),
+    
+    dashboardBody(
+      tabItems(
+        # Overview tab
+        tabItem(tabName = "overview",
+                fluidRow(
+                  valueBoxOutput("total_records"),
+                  valueBoxOutput("processing_rate"),
+                  valueBoxOutput("uptime")
+                ),
+                
+                fluidRow(
+                  box(title = "Stream Throughput", width = 12,
+                      plotlyOutput("throughput_plot", height = "300px"))
+                ),
+                
+                fluidRow(
+                  box(title = "System Health", width = 6,
+                      plotlyOutput("health_plot", height = "250px")),
+                  box(title = "Recent Activity", width = 6,
+                      DTOutput("activity_table"))
+                )
+        ),
+        
+        # Metrics tab
+        tabItem(tabName = "metrics",
+                fluidRow(
+                  box(title = "Latency Over Time", width = 6,
+                      plotlyOutput("latency_plot", height = "300px")),
+                  box(title = "Window Processing Time", width = 6,
+                      plotlyOutput("processing_time_plot", height = "300px"))
+                ),
+                
+                fluidRow(
+                  box(title = "Metric Correlation", width = 12,
+                      plotlyOutput("correlation_heatmap", height = "400px"))
+                )
+        ),
+        
+        # Anomalies tab
+        tabItem(tabName = "anomalies",
+                fluidRow(
+                  valueBoxOutput("anomaly_count"),
+                  valueBoxOutput("anomaly_rate"),
+                  valueBoxOutput("last_anomaly")
+                ),
+                
+                fluidRow(
+                  box(title = "Anomaly Timeline", width = 12,
+                      plotlyOutput("anomaly_timeline", height = "400px"))
+                ),
+                
+                fluidRow(
+                  box(title = "Anomaly Details", width = 12,
+                      DTOutput("anomaly_table"))
+                )
+        ),
+        
+        # Data preview tab
+        tabItem(tabName = "data",
+                fluidRow(
+                  box(title = "Recent Data Samples", width = 12,
+                      DTOutput("data_preview"))
+                ),
+                
+                fluidRow(
+                  box(title = "Data Statistics", width = 6,
+                      verbatimTextOutput("data_stats")),
+                  box(title = "Column Distributions", width = 6,
+                      plotlyOutput("column_distributions", height = "300px"))
+                )
+        ),
+        
+        # Controls tab
+        tabItem(tabName = "controls",
+                fluidRow(
+                  box(title = "Stream Controls", width = 6,
+                      actionButton("start_stream", "Start Stream", 
+                                   class = "btn-success"),
+                      actionButton("stop_stream", "Stop Stream", 
+                                   class = "btn-danger"),
+                      hr(),
+                      sliderInput("window_size", "Window Size:",
+                                  min = 10, max = 1000, value = 100, step = 10),
+                      sliderInput("slide_interval", "Slide Interval:",
+                                  min = 1, max = 500, value = 50, step = 10)
+                  ),
+                  
+                  box(title = "Alert Configuration", width = 6,
+                      numericInput("alert_threshold", "Alert Threshold:", 
+                                   value = 0.95, min = 0, max = 1, step = 0.01),
+                      checkboxInput("email_alerts", "Enable Email Alerts", value = FALSE),
+                      checkboxInput("slack_alerts", "Enable Slack Alerts", value = FALSE),
+                      actionButton("save_config", "Save Configuration", 
+                                   class = "btn-primary")
+                  )
+                ),
+                
+                fluidRow(
+                  box(title = "System Logs", width = 12,
+                      verbatimTextOutput("system_logs"))
+                )
+        )
+      )
+    )
+  )
+  
+  server <- function(input, output, session) {
+    
+    # Reactive values for dashboard state
+    values <- reactiveValues(
+      stream_stats = NULL,
+      anomaly_stats = NULL,
+      recent_data = NULL,
+      system_logs = c("Dashboard initialized"),
+      is_streaming = FALSE
+    )
+    
+    # Update function
+    update_dashboard <- function() {
+      if (values$is_streaming) {
+        # Get stream statistics
+        values$stream_stats <- stream_processor$stats()
+        
+        # Get anomaly statistics if available
+        if ("anomaly_stats" %in% names(stream_processor)) {
+          values$anomaly_stats <- stream_processor$anomaly_stats()
+        }
+        
+        # Add to logs
+        new_log <- sprintf("[%s] Dashboard updated", format(Sys.time()))
+        values$system_logs <- c(values$system_logs, new_log)
+        if (length(values$system_logs) > 50) {
+          values$system_logs <- tail(values$system_logs, 50)
+        }
+      }
+    }
+    
+    # Auto-update timer
+    observe({
+      invalidateLater(input$update_interval * 1000)
+      update_dashboard()
+    })
+    
+    # Manual refresh
+    observeEvent(input$refresh, {
+      update_dashboard()
+    })
+    
+    # Stream controls
+    observeEvent(input$start_stream, {
+      # Start stream in background
+      future({
+        stream_processor$start(max_records = 10000)
+      })
+      values$is_streaming <- TRUE
+      values$system_logs <- c(values$system_logs, 
+                              sprintf("[%s] Stream started", format(Sys.time())))
+    })
+    
+    observeEvent(input$stop_stream, {
+      stream_processor$stop()
+      values$is_streaming <- FALSE
+      values$system_logs <- c(values$system_logs, 
+                              sprintf("[%s] Stream stopped", format(Sys.time())))
+    })
+    
+    # Output renderers
+    output$total_records <- renderValueBox({
+      if (!is.null(values$stream_stats)) {
+        valueBox(
+          format(values$stream_stats$total_records, big.mark = ","),
+          "Total Records",
+          icon = icon("database"),
+          color = "blue"
+        )
+      } else {
+        valueBox("0", "Total Records", icon = icon("database"), color = "blue")
+      }
+    })
+    
+    output$processing_rate <- renderValueBox({
+      if (!is.null(values$stream_stats)) {
+        rate <- values$stream_stats$total_records / 
+          max(1, as.numeric(difftime(Sys.time(), 
+                                     values$stream_stats$start_time, 
+                                     units = "secs")))
+        valueBox(
+          sprintf("%.0f rec/sec", rate),
+          "Processing Rate",
+          icon = icon("tachometer-alt"),
+          color = "green"
+        )
+      } else {
+        valueBox("0 rec/sec", "Processing Rate", 
+                 icon = icon("tachometer-alt"), color = "green")
+      }
+    })
+    
+    output$anomaly_count <- renderValueBox({
+      if (!is.null(values$anomaly_stats)) {
+        color <- if (values$anomaly_stats$anomaly_rate > 5) "red" else 
+          if (values$anomaly_stats$anomaly_rate > 1) "yellow" else "green"
+        
+        valueBox(
+          values$anomaly_stats$anomaly_count,
+          "Total Anomalies",
+          icon = icon("exclamation-circle"),
+          color = color
+        )
+      } else {
+        valueBox("0", "Total Anomalies", 
+                 icon = icon("exclamation-circle"), color = "green")
+      }
+    })
+    
+    output$throughput_plot <- renderPlotly({
+      # Simulated throughput data - replace with actual stream data
+      time_seq <- seq.POSIXt(Sys.time() - 3600, Sys.time(), by = "5 min")
+      throughput <- rpois(length(time_seq), lambda = 100)
+      
+      plot_ly(x = time_seq, y = throughput, type = "scatter", mode = "lines") %>%
+        layout(title = "Records per Second",
+               xaxis = list(title = "Time"),
+               yaxis = list(title = "Records/sec"))
+    })
+    
+    output$anomaly_timeline <- renderPlotly({
+      if (!is.null(values$anomaly_stats) && 
+          length(values$anomaly_stats$recent_alerts) > 0) {
+        alerts <- values$anomaly_stats$recent_alerts
+        times <- sapply(alerts, function(a) a$timestamp)
+        scores <- sapply(alerts, function(a) a$anomaly_score)
+        
+        plot_ly(x = times, y = scores, type = "scatter", mode = "markers",
+                marker = list(size = 10, color = scores, colorscale = "RdYlGn_r")) %>%
+          layout(title = "Anomaly Timeline",
+                 xaxis = list(title = "Time"),
+                 yaxis = list(title = "Anomaly Score", range = c(0, 1)))
+      } else {
+        plot_ly() %>%
+          layout(title = "No anomalies detected",
+                 xaxis = list(title = ""),
+                 yaxis = list(title = ""))
+      }
+    })
+    
+    output$system_logs <- renderText({
+      paste(rev(values$system_logs), collapse = "\n")
+    })
+    
+    output$status_info <- renderText({
+      status <- if (values$is_streaming) "ACTIVE" else "INACTIVE"
+      color <- if (values$is_streaming) "green" else "red"
+      
+      paste0("Status: ", status, "\n",
+             "Last update: ", format(Sys.time()), "\n",
+             "Update interval: ", input$update_interval, "s")
+    })
+    
+    # Additional output renderers would be implemented here...
+  }
+  
+  # Return Shiny app
+  return(shinyApp(ui, server))
+}
+

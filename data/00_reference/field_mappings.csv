@@ -1,0 +1,88 @@
+﻿source_field,target_field,data_type,source_yaml,notes
+Ticker,ticker,string,production,Primary identifier
+Symbol,ticker,string,field_mapping,Alternate ticker
+ID_BB_GLOBAL,ticker,string,production,Bloomberg global ID
+Matched_Ticker,ticker,string,production,Matched from DUMAC
+ISIN,ticker,string,production,International ID
+SEDOL,ticker,string,production,UK/International ID
+Instr/BB_Code,ticker,string,production,Bloomberg instrument code
+Company Code,ticker,string,field_mapping,Internal company code
+Issuer Ticker,ticker,string,field_mapping,Issuer-level ticker
+R&D Exp,rd_expense,numeric,production,Bloomberg field
+R.D.Exp,rd_expense,numeric,production,Alternate format
+RD_Expense,rd_expense,numeric,production,Clean name
+Research_Development,rd_expense,numeric,production,Full name
+Research and Development Expense,rd_expense,numeric,field_mapping,Full name
+X(p) Research & Development,rd_expense,numeric,production,Bloomberg raw
+Research Expense,rd_expense,numeric,field_mapping,Alternate
+Mkt Cap,market_cap,numeric,production,Bloomberg field
+Mkt.Cap,market_cap,numeric,production,Dot format
+MarketCap,market_cap,numeric,production,Camel case
+CUR_MKT_CAP,market_cap,numeric,production,Bloomberg code
+Market Capitalization,market_cap,numeric,both,Full name
+Assets,market_cap,numeric,field_mapping,Generic
+BEst Analyst Rtg,analyst_rating,numeric,production,Bloomberg field
+BEst.Analyst.Rtg,analyst_rating,numeric,production,Dot format
+ANR,analyst_rating,numeric,production,Bloomberg code
+BEST_ANALYST_RATING,analyst_rating,numeric,production,API field
+Analyst Consensus,analyst_rating,numeric,production,Alternate
+Rec Consensus,analyst_rating,numeric,production,Short name
+Analyst Coverage,analyst_coverage,integer,field_mapping,Number of analysts
+Number of Analysts,analyst_coverage,integer,field_mapping,Count
+Tot.Analyst.Rec,analyst_coverage,integer,field_mapping,Bloomberg count
+Analyst Recommendations,analyst_coverage,integer,field_mapping,Alternate
+Patents / Trademarks / Copy Rgt,patent_count,integer,production,Bloomberg field
+Patents...Trademarks...Copy.Rgt,patent_count,integer,production,Dot format
+Patent_Count,patent_count,integer,production,Clean name
+NO_PATENTS,patent_count,integer,production,Bloomberg code
+Intellectual Property,patent_count,integer,production,Alternate
+Patent Applications,patent_applications,integer,field_mapping,Count
+Patents,patent_applications,integer,field_mapping,Short name
+News Sent,news_sentiment,numeric,production,Bloomberg field
+News.Sent,news_sentiment,numeric,production,Dot format
+NEWS_SENTIMENT,news_sentiment,numeric,production,API field
+News Sentiment Score,news_sentiment,numeric,production,Full name
+Sentiment,news_sentiment,numeric,production,Short name
+News Volume,news_volume,integer,field_mapping,Volume count
+News Count,news_volume,integer,field_mapping,Count
+Rev - 1 Yr Gr,revenue_growth,numeric,production,Bloomberg field
+Rev...1.Yr.Gr,revenue_growth,numeric,production,Dot format
+Sales_Growth,revenue_growth,numeric,production,Alternate
+RTG_SALES_GROWTH,revenue_growth,numeric,production,Bloomberg code
+Revenue Growth 1Y,revenue_growth,numeric,production,Full name
+Growth,revenue_growth,numeric,field_mapping,Short name
+1 Year Growth,revenue_growth,numeric,field_mapping,Alternate
+GICS Ind Grp Name,industry,string,production,Bloomberg field
+GICS.Ind.Grp.Name,industry,string,production,Dot format
+Instr/BB_IndustrySector,industry,string,production,DUMAC format
+Industry,industry,string,both,Generic
+Sector,industry,string,both,Sector level
+GICS_INDUSTRY_GROUP_NAME,industry,string,production,API format
+GICS Industry,gics_industry,string,field_mapping,Specific GICS field
+Fund Name,fund_name,string,production,DUMAC field
+fund_name,fund_name,string,production,Lowercase
+Fund/Fund Legal Name (2),fund_name,string,production,DUMAC format
+Fund_Fund_Legal_Name_2,fund_name,string,production,Underscore format
+Manager,fund_name,string,production,Short name
+Long (%LTP),fund_weight,numeric,production,DUMAC field
+fund_weight,fund_weight,numeric,production,Standard name
+Weight,fund_weight,numeric,production,Generic
+FUND_WEIGHT,fund_weight,numeric,production,Uppercase
+Net (%LTP),fund_weight,numeric,production,Net version
+Long (%Manager),fund_weight,numeric,production,Manager version
+Risk/Long Exposure,fund_weight,numeric,production,Risk version
+Positions/Base/Total NAV,fund_weight,numeric,production,NAV version
+dumac_allocation,fund_weight,numeric,production,Allocation field
+fund_weight_raw,fund_weight,numeric,production,Raw weight
+position_value,position_value,numeric,production,DUMAC field
+Positions/Base/Notional Market Value (Base),position_value,numeric,production,DUMAC format
+MV,position_value,numeric,production,Short name
+shares_held,shares_held,numeric,production,DUMAC field
+Positions/End Quantity,shares_held,numeric,production,DUMAC format
+Quantity,shares_held,numeric,production,Generic
+as_of_date,as_of_date,date,production,DUMAC field
+date,as_of_date,date,production,Generic
+Position Date,as_of_date,date,production,Alternate
+fund_id,fund_id,string,production,DUMAC field
+Fund/Client Code,fund_id,string,production,DUMAC format
+DW_ID,fund_id,string,production,Data warehouse ID

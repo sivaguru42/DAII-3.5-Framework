@@ -1,0 +1,670 @@
+# =========================================================
+# DAII FRAMEWORK - LOGICAL SECTION
+# Original file: DAII_3.5_Master_Phase2_MachineLearning_CompleteFramework_Architecture_Code_1_23_2026.txt
+# Section: 3 of 14
+# Title: Section_003
+# Lines: 853 - 1514 of 9611
+# =========================================================
+
+# ============================================================================
+
+# SECTION 2.1: DATA CLEANSING & IMPUTATION
+# ----------------------------------------------------------------------------
+
+#' @title Intelligent Missing Value Imputation
+#' @description Uses multiple strategies for optimal missing value imputation
+#' @param data Input data frame
+#' @param method Imputation method: "auto", "mice", "knn", "median", "rf"
+#' @param max_missing Maximum percentage of missing values per column (default: 50)
+#' @param seed Random seed for reproducibility
+#' @return Imputed data frame with imputation report
+
+impute_missing_intelligent <- function(data, method = "auto", max_missing = 50, 
+                                       seed = 42) {
+  
+  set.seed(seed)
+  original_na <- sum(is.na(data))
+  
+  if (original_na == 0) {
+    message("No missing values found")
+    return(data)
+  }
+  
+  # Calculate missing percentages
+  missing_pct <- colMeans(is.na(data)) * 100
+  
+  # Drop columns with too many missing values
+  cols_to_drop <- names(missing_pct[missing_pct > max_missing])
+  if (length(cols_to_drop) > 0) {
+    warning("Dropping columns with >", max_missing, "% missing: ", 
+            paste(cols_to_drop, collapse = ", "))
+    data <- data[, !names(data) %in% cols_to_drop, drop = FALSE]
+    missing_pct <- colMeans(is.na(data)) * 100
+  }
+  
+  # Auto method selection
+  if (method == "auto") {
+    numeric_cols <- names(data)[sapply(data, is.numeric)]
+    categorical_cols <- names(data)[sapply(data, is.character) | 
+                                      sapply(data, is.factor)]
+    
+    if (length(numeric_cols) > 0 && length(categorical_cols) > 0) {
+      method <- "mice"  # Mixed data types
+    } else if (length(numeric_cols) > 0) {
+      method <- "median"  # Only numeric
+    } else {
+      method <- "mode"  # Only categorical
+    }
+  }
+  
+  imputed_data <- data
+  imputation_report <- list(
+    method = method,
+    columns_imputed = list(),
+    dropped_columns = cols_to_drop,
+    na_before = original_na,
+    timestamp = Sys.time()
+  )
+  
+  # Apply selected imputation method
+  if (method == "median") {
+    for (col in names(data)[sapply(data, is.numeric)]) {
+      if (any(is.na(data[[col]]))) {
+        imputed_data[[col]][is.na(data[[col]])] <- median(data[[col]], na.rm = TRUE)
+        imputation_report$columns_imputed[[col]] <- list(
+          method = "median",
+          imputed_count = sum(is.na(data[[col]])),
+          imputed_value = median(data[[col]], na.rm = TRUE)
+        )
+      }
+    }
+    
+  } else if (method == "mode") {
+    for (col in names(data)[sapply(data, is.character) | sapply(data, is.factor)]) {
+      if (any(is.na(data[[col]]))) {
+        mode_val <- names(sort(table(data[[col]]), decreasing = TRUE))[1]
+        imputed_data[[col]][is.na(data[[col]])] <- mode_val
+        imputation_report$columns_imputed[[col]] <- list(
+          method = "mode",
+          imputed_count = sum(is.na(data[[col]])),
+          imputed_value = mode_val
+        )
+      }
+    }
+    
+  } else if (method == "knn") {
+    require(VIM)
+    numeric_cols <- names(data)[sapply(data, is.numeric)]
+    if (length(numeric_cols) > 1) {
+      knn_imp <- VIM::kNN(data[, numeric_cols], k = 5)
+      imputed_data[, numeric_cols] <- knn_imp[, 1:length(numeric_cols)]
+      
+      for (col in numeric_cols) {
+        if (any(is.na(data[[col]]))) {
+          imputation_report$columns_imputed[[col]] <- list(
+            method = "knn",
+            imputed_count = sum(is.na(data[[col]])),
+            k = 5
+          )
+        }
+      }
+    }
+    
+  } else if (method == "mice") {
+    require(mice)
+    
+    # Convert factors for mice
+    factor_cols <- names(data)[sapply(data, is.factor)]
+    for (col in factor_cols) {
+      imputed_data[[col]] <- as.character(imputed_data[[col]])
+    }
+    
+    # Perform mice imputation
+    mice_imp <- mice(imputed_data, m = 1, maxit = 10, seed = seed, 
+                     printFlag = FALSE)
+    imputed_data <- complete(mice_imp)
+    
+    # Convert back to factors
+    for (col in factor_cols) {
+      imputed_data[[col]] <- as.factor(imputed_data[[col]])
+    }
+    
+    imputation_report$mice_iterations <- mice_imp$iter
+    
+  } else if (method == "rf") {
+    require(missForest)
+    
+    rf_imp <- missForest(imputed_data, maxiter = 10, ntree = 100,
+                         variablewise = TRUE, verbose = FALSE)
+    imputed_data <- rf_imp$ximp
+    
+    imputation_report$rf_oob_error <- rf_imp$OOBerror
+  }
+  
+  # Final check and warning for any remaining NAs
+  remaining_na <- sum(is.na(imputed_data))
+  if (remaining_na > 0) {
+    warning(remaining_na, " missing values remain after imputation")
+  }
+  
+  imputation_report$na_after <- remaining_na
+  imputation_report$reduction_pct <- (1 - remaining_na / original_na) * 100
+  
+  attr(imputed_data, "imputation_report") <- imputation_report
+  
+  logger::log_info("Imputation completed: {round(imputation_report$reduction_pct, 1)}% reduction")
+  
+  return(imputed_data)
+}
+
+#' @title Outlier Detection and Treatment
+#' @description Identifies and treats outliers using multiple methods
+#' @param data Input data frame
+#' @param method Detection method: "iqr", "zscore", "isolation_forest", "lof"
+#' @param treatment Treatment method: "cap", "remove", "impute", "winsorize"
+#' @param threshold Threshold parameter for detection
+#' @return Data with treated outliers and detection report
+
+handle_outliers <- function(data, method = "iqr", treatment = "cap", 
+                            threshold = 1.5) {
+  
+  outlier_report <- list(
+    method = method,
+    treatment = treatment,
+    threshold = threshold,
+    columns_analyzed = list(),
+    total_outliers = 0,
+    timestamp = Sys.time()
+  )
+  
+  treated_data <- data
+  
+  # Only analyze numeric columns
+  numeric_cols <- names(data)[sapply(data, is.numeric)]
+  
+  for (col in numeric_cols) {
+    col_data <- data[[col]]
+    
+    if (any(is.na(col_data))) {
+      # Handle missing values first
+      col_data[is.na(col_data)] <- median(col_data, na.rm = TRUE)
+    }
+    
+    outliers <- numeric(0)
+    
+    # Detect outliers based on method
+    if (method == "iqr") {
+      q1 <- quantile(col_data, 0.25, na.rm = TRUE)
+      q3 <- quantile(col_data, 0.75, na.rm = TRUE)
+      iqr <- q3 - q1
+      lower_bound <- q1 - threshold * iqr
+      upper_bound <- q3 + threshold * iqr
+      outliers <- which(col_data < lower_bound | col_data > upper_bound)
+      
+    } else if (method == "zscore") {
+      z_scores <- abs(scale(col_data))
+      outliers <- which(z_scores > threshold)
+      
+    } else if (method == "mad") {
+      median_val <- median(col_data)
+      mad_val <- mad(col_data, constant = 1.4826)
+      outliers <- which(abs(col_data - median_val) / mad_val > threshold)
+    }
+    
+    outlier_count <- length(outliers)
+    outlier_report$columns_analyzed[[col]] <- list(
+      total_values = length(col_data),
+      outlier_count = outlier_count,
+      outlier_percentage = outlier_count / length(col_data) * 100,
+      outliers_indices = outliers
+    )
+    
+    outlier_report$total_outliers <- outlier_report$total_outliers + outlier_count
+    
+    # Apply treatment if outliers found
+    if (outlier_count > 0 && treatment != "none") {
+      if (treatment == "cap") {
+        if (method == "iqr") {
+          treated_data[[col]][outliers] <- ifelse(
+            col_data[outliers] < lower_bound, lower_bound,
+            ifelse(col_data[outliers] > upper_bound, upper_bound, 
+                   col_data[outliers])
+          )
+        } else if (method == "zscore") {
+          # Cap at threshold standard deviations
+          mean_val <- mean(col_data, na.rm = TRUE)
+          sd_val <- sd(col_data, na.rm = TRUE)
+          treated_data[[col]][outliers] <- ifelse(
+            col_data[outliers] > mean_val, 
+            mean_val + threshold * sd_val,
+            mean_val - threshold * sd_val
+          )
+        }
+        
+      } else if (treatment == "remove") {
+        treated_data <- treated_data[-outliers, ]
+        
+      } else if (treatment == "impute") {
+        # Replace outliers with median
+        treated_data[[col]][outliers] <- median(col_data[-outliers], na.rm = TRUE)
+        
+      } else if (treatment == "winsorize") {
+        # Winsorize at given percentiles
+        lower_pct <- quantile(col_data, 0.05, na.rm = TRUE)
+        upper_pct <- quantile(col_data, 0.95, na.rm = TRUE)
+        treated_data[[col]][outliers] <- ifelse(
+          col_data[outliers] < lower_pct, lower_pct,
+          ifelse(col_data[outliers] > upper_pct, upper_pct, 
+                 col_data[outliers])
+        )
+      }
+    }
+  }
+  
+  # Advanced methods for multivariate outlier detection
+  if (method %in% c("isolation_forest", "lof") && length(numeric_cols) > 1) {
+    if (method == "isolation_forest") {
+      require(isotree)
+      
+      iso_forest <- isolation.forest(data[, numeric_cols], 
+                                     ndim = length(numeric_cols),
+                                     ntrees = 100)
+      scores <- predict(iso_forest, data[, numeric_cols])
+      outliers <- which(scores > quantile(scores, 0.95))
+      
+    } else if (method == "lof") {
+      require(dbscan)
+      
+      lof_scores <- lof(data[, numeric_cols], k = 10)
+      outliers <- which(lof_scores > threshold)
+    }
+    
+    outlier_report$multivariate_outliers <- list(
+      method = method,
+      outlier_count = length(outliers),
+      outlier_indices = outliers
+    )
+  }
+  
+  attr(treated_data, "outlier_report") <- outlier_report
+  
+  return(treated_data)
+}
+
+# SECTION 2.2: DATA TRANSFORMATION & NORMALIZATION
+# ----------------------------------------------------------------------------
+
+#' @title Automated Feature Scaling
+#' @description Applies appropriate scaling based on data distribution
+#' @param data Input data frame
+#' @param method Scaling method: "auto", "standard", "minmax", "robust", "quantile"
+#' @param exclude Columns to exclude from scaling
+#' @return Scaled data with scaling parameters
+
+scale_features_auto <- function(data, method = "auto", exclude = NULL) {
+  
+  numeric_cols <- names(data)[sapply(data, is.numeric)]
+  
+  if (!is.null(exclude)) {
+    numeric_cols <- setdiff(numeric_cols, exclude)
+  }
+  
+  scaling_report <- list(
+    method = method,
+    columns_scaled = numeric_cols,
+    scaling_parameters = list(),
+    timestamp = Sys.time()
+  )
+  
+  scaled_data <- data
+  
+  for (col in numeric_cols) {
+    col_data <- data[[col]]
+    
+    # Auto method selection based on data characteristics
+    if (method == "auto") {
+      # Check for outliers
+      q1 <- quantile(col_data, 0.25, na.rm = TRUE)
+      q3 <- quantile(col_data, 0.75, na.rm = TRUE)
+      iqr <- q3 - q1
+      outliers <- col_data < (q1 - 1.5 * iqr) | col_data > (q3 + 1.5 * iqr)
+      
+      if (sum(outliers, na.rm = TRUE) / length(col_data) > 0.05) {
+        selected_method <- "robust"  # Many outliers
+      } else if (shapiro.test(col_data[1:min(5000, length(col_data))])$p.value < 0.05) {
+        selected_method <- "quantile"  # Non-normal distribution
+      } else {
+        selected_method <- "standard"  # Normal distribution
+      }
+    } else {
+      selected_method <- method
+    }
+    
+    # Apply scaling
+    if (selected_method == "standard") {
+      mean_val <- mean(col_data, na.rm = TRUE)
+      sd_val <- sd(col_data, na.rm = TRUE)
+      scaled_data[[col]] <- (col_data - mean_val) / sd_val
+      
+      scaling_report$scaling_parameters[[col]] <- list(
+        method = "standard",
+        mean = mean_val,
+        sd = sd_val
+      )
+      
+    } else if (selected_method == "minmax") {
+      min_val <- min(col_data, na.rm = TRUE)
+      max_val <- max(col_data, na.rm = TRUE)
+      scaled_data[[col]] <- (col_data - min_val) / (max_val - min_val)
+      
+      scaling_report$scaling_parameters[[col]] <- list(
+        method = "minmax",
+        min = min_val,
+        max = max_val
+      )
+      
+    } else if (selected_method == "robust") {
+      median_val <- median(col_data, na.rm = TRUE)
+      iqr_val <- IQR(col_data, na.rm = TRUE)
+      scaled_data[[col]] <- (col_data - median_val) / iqr_val
+      
+      scaling_report$scaling_parameters[[col]] <- list(
+        method = "robust",
+        median = median_val,
+        iqr = iqr_val
+      )
+      
+    } else if (selected_method == "quantile") {
+      require(caret)
+      scaled_data[[col]] <- caret::preProcess(data.frame(col_data), 
+                                              method = c("center", "scale", "YeoJohnson")) %>%
+        predict(data.frame(col_data)) %>%
+        .[[1]]
+      
+      scaling_report$scaling_parameters[[col]] <- list(
+        method = "quantile",
+        transformation = "YeoJohnson"
+      )
+    }
+  }
+  
+  attr(scaled_data, "scaling_report") <- scaling_report
+  
+  return(scaled_data)
+}
+
+#' @title Feature Selection using Multiple Algorithms
+#' @description Selects important features using filter, wrapper, and embedded methods
+#' @param data Input data frame
+#' @param target Target variable name
+#' @param method Selection method: "variance", "correlation", "rf", "lasso", "boruta"
+#' @param n_features Number of features to select (default: auto)
+#' @return Selected features and importance scores
+
+select_features <- function(data, target = NULL, method = "auto", 
+                            n_features = NULL) {
+  
+  require(caret)
+  require(Boruta)
+  
+  selection_report <- list(
+    method = method,
+    target = target,
+    timestamp = Sys.time()
+  )
+  
+  # Exclude target from features
+  if (!is.null(target)) {
+    features <- data[, !names(data) %in% target, drop = FALSE]
+    target_vector <- data[[target]]
+  } else {
+    features <- data
+    target_vector <- NULL
+  }
+  
+  # Auto method selection
+  if (method == "auto") {
+    if (is.numeric(target_vector)) {
+      method <- "rf"  # Regression
+    } else if (is.factor(target_vector) || is.character(target_vector)) {
+      method <- "boruta"  # Classification
+    } else {
+      method <- "variance"  # Unsupervised
+    }
+  }
+  
+  selected_features <- list()
+  importance_scores <- NULL
+  
+  if (method == "variance") {
+    # Variance threshold
+    variances <- apply(features, 2, var, na.rm = TRUE)
+    threshold <- quantile(variances, 0.1)  # Remove bottom 10%
+    selected <- names(variances[variances > threshold])
+    
+    selection_report$variance_threshold <- threshold
+    importance_scores <- variances
+    
+  } else if (method == "correlation") {
+    if (!is.null(target_vector) && is.numeric(target_vector)) {
+      # Correlation with target
+      correlations <- sapply(features, function(x) {
+        cor(x, target_vector, use = "pairwise.complete.obs", method = "pearson")
+      })
+      correlations <- abs(correlations)
+      
+      if (is.null(n_features)) {
+        threshold <- quantile(correlations, 0.5)  # Top 50%
+      } else {
+        threshold <- sort(correlations, decreasing = TRUE)[min(n_features, length(correlations))]
+      }
+      
+      selected <- names(correlations[correlations >= threshold])
+      importance_scores <- correlations
+      
+    } else {
+      # Remove highly correlated features
+      cor_matrix <- cor(features, use = "pairwise.complete.obs")
+      diag(cor_matrix) <- 0
+      
+      highly_correlated <- findCorrelation(cor_matrix, cutoff = 0.9)
+      selected <- setdiff(names(features), names(features)[highly_correlated])
+      
+      selection_report$correlation_cutoff <- 0.9
+    }
+    
+  } else if (method == "rf") {
+    # Random Forest importance
+    require(ranger)
+    
+    if (!is.null(target_vector)) {
+      rf_model <- ranger(
+        x = features,
+        y = target_vector,
+        importance = "permutation",
+        num.trees = 100,
+        verbose = FALSE
+      )
+      
+      importance_scores <- rf_model$variable.importance
+      
+      if (is.null(n_features)) {
+        n_features <- ceiling(length(importance_scores) * 0.3)  # Top 30%
+      }
+      
+      selected <- names(sort(importance_scores, decreasing = TRUE)[1:n_features])
+      
+      selection_report$rf_trees <- 100
+    }
+    
+  } else if (method == "lasso") {
+    # LASSO regression
+    require(glmnet)
+    
+    if (!is.null(target_vector) && is.numeric(target_vector)) {
+      # Convert to matrix
+      x_matrix <- as.matrix(features)
+      y_vector <- target_vector
+      
+      # Fit LASSO
+      cv_lasso <- cv.glmnet(x_matrix, y_vector, alpha = 1, nfolds = 10)
+      
+      # Get coefficients at optimal lambda
+      coefficients <- coef(cv_lasso, s = "lambda.min")
+      nonzero_coef <- coefficients[coefficients[,1] != 0,]
+      
+      selected <- names(nonzero_coef)[-1]  # Remove intercept
+      importance_scores <- abs(nonzero_coef)[-1]
+      
+      selection_report$lasso_lambda <- cv_lasso$lambda.min
+    }
+    
+  } else if (method == "boruta") {
+    # Boruta feature selection
+    if (!is.null(target_vector)) {
+      boruta_result <- Boruta(features, target_vector, 
+                              maxRuns = 100, doTrace = 0)
+      
+      selected <- getSelectedAttributes(boruta_result, withTentative = TRUE)
+      importance_scores <- boruta_result$ImpHistory
+      
+      selection_report$boruta_runs <- 100
+    }
+  }
+  
+  # Ensure we have selected features
+  if (length(selected) == 0) {
+    warning("No features selected, returning all features")
+    selected <- names(features)
+  }
+  
+  # Add target back if it exists
+  if (!is.null(target)) {
+    selected <- c(selected, target)
+  }
+  
+  selection_report$selected_count <- length(selected)
+  selection_report$total_features <- ncol(data)
+  selection_report$selected_features <- selected
+  selection_report$importance_scores <- importance_scores
+  
+  # Return subset of data
+  result_data <- data[, selected, drop = FALSE]
+  attr(result_data, "selection_report") <- selection_report
+  
+  return(result_data)
+}
+
+# SECTION 2.3: TEXT PROCESSING & NLP
+# ----------------------------------------------------------------------------
+
+#' @title Advanced Text Processing Pipeline
+#' @description Comprehensive text cleaning and feature extraction
+#' @param text_vector Character vector of text data
+#' @param language Text language (default: "english")
+#' @param min_term_freq Minimum term frequency (default: 5)
+#' @param max_terms Maximum number of terms (default: 1000)
+#' @return List with processed text and extracted features
+
+process_text <- function(text_vector, language = "english", 
+                         min_term_freq = 5, max_terms = 1000) {
+  
+  require(tm)
+  require(text2vec)
+  require(quanteda)
+  
+  processing_report <- list(
+    language = language,
+    input_length = length(text_vector),
+    timestamp = Sys.time()
+  )
+  
+  # Clean text
+  cleaned_text <- tolower(text_vector)
+  
+  # Remove URLs
+  cleaned_text <- gsub("https?://\\S+|www\\.\\S+", "", cleaned_text)
+  
+  # Remove mentions and hashtags
+  cleaned_text <- gsub("[@#]\\w+", "", cleaned_text)
+  
+  # Remove punctuation and numbers
+  cleaned_text <- gsub("[[:punct:]]", " ", cleaned_text)
+  cleaned_text <- gsub("[[:digit:]]", " ", cleaned_text)
+  
+  # Remove extra whitespace
+  cleaned_text <- gsub("\\s+", " ", cleaned_text)
+  cleaned_text <- trimws(cleaned_text)
+  
+  # Create document-term matrix
+  corpus <- Corpus(VectorSource(cleaned_text))
+  
+  # Apply transformations
+  corpus <- tm_map(corpus, removeWords, stopwords(language))
+  corpus <- tm_map(corpus, stripWhitespace)
+  corpus <- tm_map(corpus, stemDocument, language = language)
+  
+  # Create DTM
+  dtm <- DocumentTermMatrix(corpus, 
+                            control = list(
+                              bounds = list(global = c(min_term_freq, Inf)),
+                              weighting = weightTfIdf
+                            ))
+  
+  # Reduce dimensionality
+  dtm_reduced <- removeSparseTerms(dtm, sparse = 0.95)
+  
+  # Convert to matrix
+  dtm_matrix <- as.matrix(dtm_reduced)
+  
+  # Limit number of terms
+  if (ncol(dtm_matrix) > max_terms) {
+    term_freq <- colSums(dtm_matrix)
+    top_terms <- names(sort(term_freq, decreasing = TRUE))[1:max_terms]
+    dtm_matrix <- dtm_matrix[, top_terms]
+  }
+  
+  # Extract text statistics
+  text_stats <- data.frame(
+    char_count = nchar(text_vector),
+    word_count = sapply(strsplit(text_vector, "\\s+"), length),
+    sentence_count = sapply(strsplit(text_vector, "[.!?]+"), length),
+    avg_word_length = nchar(text_vector) / 
+      (sapply(strsplit(text_vector, "\\s+"), length) + 1),
+    contains_question = grepl("\\?", text_vector),
+    contains_exclamation = grepl("!", text_vector),
+    stringsAsFactors = FALSE
+  )
+  
+  # Sentiment analysis (simple lexicon-based)
+  positive_words <- c("good", "great", "excellent", "happy", "positive", 
+                      "love", "like", "awesome", "fantastic")
+  negative_words <- c("bad", "poor", "terrible", "sad", "negative", 
+                      "hate", "dislike", "awful", "horrible")
+  
+  sentiment_scores <- sapply(cleaned_text, function(text) {
+    words <- unlist(strsplit(text, "\\s+"))
+    pos_count <- sum(words %in% positive_words)
+    neg_count <- sum(words %in% negative_words)
+    return(pos_count - neg_count)
+  })
+  
+  processing_report$text_stats_summary <- summary(text_stats)
+  processing_report$dtm_dimensions <- dim(dtm_matrix)
+  processing_report$unique_terms <- ncol(dtm_matrix)
+  
+  # Combine features
+  all_features <- cbind(text_stats, 
+                        sentiment_score = sentiment_scores,
+                        as.data.frame(dtm_matrix))
+  
+  result <- list(
+    cleaned_text = cleaned_text,
+    features = all_features,
+    dtm = dtm_matrix,
+    processing_report = processing_report
+  )
+  
+  return(result)
+}
+
