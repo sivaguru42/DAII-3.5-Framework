@@ -1,0 +1,11 @@
+"ticker","ai_score","innovation_score","ai_quartile","innovation_quartile","ai_label","innovation_label","in_portfolio"
+"AAPL",0.66,0.55,1,2,"AI Laggard","Developing",TRUE
+"AMD",1.275,0.85,4,4,"AI Leader","Leader",TRUE
+"AMZN",0.96,0.8,3,4,"AI Adopter","Leader",TRUE
+"GOOGL",0.84,0.6,2,2,"AI Follower","Developing",TRUE
+"INTC",1.0875,0.725,4,3,"AI Leader","Strong",TRUE
+"META",NA,NA,NA,NA,"AI Laggard","Emerging",TRUE
+"MSFT",0.7,0.5,2,1,"AI Follower","Emerging",TRUE
+"NVDA",0.975,0.65,3,3,"AI Adopter","Strong",TRUE
+"TSLA",0.3575,0.325,1,1,"AI Laggard","Emerging",TRUE
+"V",0.38,0.475,1,1,"AI Laggard","Emerging",TRUE
