@@ -1,0 +1,21 @@
+"ticker","ai_score","innovation_score","ai_quartile","innovation_quartile","ai_label","innovation_label","in_portfolio"
+"AAPL",0.6,0.6,2,2,"AI Follower","Developing",FALSE
+"AMD",0.7,0.7,3,3,"AI Adopter","Strong",FALSE
+"AMZN",0.6,0.6,2,2,"AI Follower","Developing",FALSE
+"BAC",0.375,0.375,1,1,"AI Laggard","Emerging",FALSE
+"DIS",0.5,0.5,1,1,"AI Laggard","Emerging",FALSE
+"GOOGL",0.575,0.575,2,2,"AI Follower","Developing",FALSE
+"HD",0.8,0.8,4,4,"AI Leader","Leader",FALSE
+"INTC",0.575,0.575,2,2,"AI Follower","Developing",FALSE
+"JNJ",0.6,0.6,3,3,"AI Adopter","Strong",FALSE
+"JPM",0.55,0.55,1,1,"AI Laggard","Emerging",FALSE
+"MA",0.5,0.5,1,1,"AI Laggard","Emerging",FALSE
+"META",0.75,0.75,4,4,"AI Leader","Leader",FALSE
+"MSFT",0.6,0.6,3,3,"AI Adopter","Strong",FALSE
+"NVDA",0.55,0.55,2,2,"AI Follower","Developing",FALSE
+"PFE",0.7,0.7,3,3,"AI Adopter","Strong",FALSE
+"PG",0.625,0.625,3,3,"AI Adopter","Strong",FALSE
+"TSLA",0.45,0.45,1,1,"AI Laggard","Emerging",FALSE
+"UNH",0.8,0.8,4,4,"AI Leader","Leader",FALSE
+"V",0.775,0.775,4,4,"AI Leader","Leader",FALSE
+"WMT",0.875,0.875,4,4,"AI Leader","Leader",FALSE
