@@ -1,0 +1,5 @@
+"ticker","discovery_quality_weight","innovation_score","volatility","discovery_tier"
+"JPM",0.227272727272727,0.75,0.266103469391486,"Tier 1: Top 10 Opportunities"
+"MA",0.28030303030303,0.925,0.249367782727767,"Tier 1: Top 10 Opportunities"
+"PFE",0.25,0.825,0.264837733957094,"Tier 1: Top 10 Opportunities"
+"V",0.242424242424242,0.8,0.267799767882601,"Tier 1: Top 10 Opportunities"
