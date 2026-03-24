@@ -1,0 +1,193 @@
+"ticker","innovation_score","ai_score","discovery_tier","innovation_rank","ai_rank","combined_rank","discovery_quality_weight","discovery_ai_weight"
+"PFE",0.925,0.925,"Tier 1: Top 10 Opportunities",1,1,1,0,0
+"LI",0.9,0.9,"Tier 1: Top 10 Opportunities",2,2,2,0,0
+"SAP",0.875,0.875,"Tier 1: Top 10 Opportunities",3,3,3,0,0
+"TAK",0.85,0.85,"Tier 1: Top 10 Opportunities",4,4,4,0,0
+"ANET",0.85,0.85,"Tier 1: Top 10 Opportunities",6,6,6,0,0
+"MSFT",0.85,0.85,"Tier 1: Top 10 Opportunities",6,6,6,0,0
+"SNY",0.85,0.85,"Tier 1: Top 10 Opportunities",6,6,6,0,0
+"WB",0.825,0.825,"Tier 1: Top 10 Opportunities",8,8,8,0,0
+"BIO",0.825,0.825,"Tier 1: Top 10 Opportunities",9.5,9.5,9.5,0,0
+"META",0.825,0.825,"Tier 1: Top 10 Opportunities",9.5,9.5,9.5,0,0
+"IQ",0.8,0.8,"Tier 2: Strong Candidates",11,11,11,0,0
+"HMC",0.8,0.8,"Tier 2: Strong Candidates",12,12,12,0,0
+"AMZN",0.775,0.775,"Tier 2: Strong Candidates",14,14,14,0,0
+"NTES",0.775,0.775,"Tier 2: Strong Candidates",14,14,14,0,0
+"NVS",0.775,0.775,"Tier 2: Strong Candidates",14,14,14,0,0
+"AVGO",0.75,0.75,"Tier 2: Strong Candidates",16.5,16.5,16.5,0,0
+"PCOR",0.75,0.75,"Tier 2: Strong Candidates",16.5,16.5,16.5,0,0
+"BA",0.75,0.75,"Tier 2: Strong Candidates",18.5,18.5,18.5,0,0
+"PDD",0.75,0.75,"Tier 2: Strong Candidates",18.5,18.5,18.5,0,0
+"SHEL",0.725,0.725,"Tier 2: Strong Candidates",20,20,20,0,0
+"CAT",0.725,0.725,"Tier 2: Strong Candidates",21.5,21.5,21.5,0,0
+"TEAM",0.725,0.725,"Tier 2: Strong Candidates",21.5,21.5,21.5,0,0
+"BABA",0.725,0.725,"Tier 2: Strong Candidates",23.5,23.5,23.5,0,0
+"JD",0.725,0.725,"Tier 2: Strong Candidates",23.5,23.5,23.5,0,0
+"BILI",0.7,0.7,"Tier 2: Strong Candidates",25,25,25,0,0
+"CRM",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"DE",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"GOOGL",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"SNOW",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"TXN",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"XOM",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"ZM",0.7,0.7,"Tier 3: Watch List",29,29,29,0,0
+"AAPL",0.675,0.675,"Tier 3: Watch List",34,34,34,0,0
+"CSCO",0.675,0.675,"Tier 3: Watch List",34,34,34,0,0
+"UL",0.675,0.675,"Tier 3: Watch List",34,34,34,0,0
+"APH",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"BIDU",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"MELI",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"TCOM",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"TSM",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"WDAY",0.675,0.675,"Tier 3: Watch List",38.5,38.5,38.5,0,0
+"ABBV",0.65,0.65,"Tier 3: Watch List",43.5,43.5,43.5,0,0
+"HUBS",0.65,0.65,"Tier 3: Watch List",43.5,43.5,43.5,0,0
+"NVO",0.65,0.65,"Tier 3: Watch List",43.5,43.5,43.5,0,0
+"RTX",0.65,0.65,"Tier 3: Watch List",43.5,43.5,43.5,0,0
+"IBM",0.65,0.65,"Tier 3: Watch List",46,46,46,0,0
+"ABT",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"ADBE",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"AMAT",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"BILL",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"CAJPY",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"COIN",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"DOCU",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"GRAB",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"INTC",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"KAOCF",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"MU",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"NJDCY",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"NOW",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"XPEV",0.625,0.625,"Tier 4: Monitor",53.5,53.5,53.5,0,0
+"MMM",0.6,0.6,"Tier 4: Monitor",62,62,62,0,0
+"RHHBY",0.6,0.6,"Tier 4: Monitor",62,62,62,0,0
+"TMO",0.6,0.6,"Tier 4: Monitor",62,62,62,0,0
+"ASAN",0.6,0.6,"Tier 4: Monitor",65.5,65.5,65.5,0,0
+"ASML",0.6,0.6,"Tier 4: Monitor",65.5,65.5,65.5,0,0
+"LLY",0.6,0.6,"Tier 4: Monitor",65.5,65.5,65.5,0,0
+"QCOM",0.6,0.6,"Tier 4: Monitor",65.5,65.5,65.5,0,0
+"SAIL",0.575,0.575,"Tier 4: Monitor",68,68,68,0,0
+"APD",0.575,0.575,"Tier 4: Monitor",70,70,70,0,0
+"GE",0.575,0.575,"Tier 4: Monitor",70,70,70,0,0
+"MRK",0.575,0.575,"Tier 4: Monitor",70,70,70,0,0
+"BP",0.55,0.55,"Tier 4: Monitor",73.5,73.5,73.5,0,0
+"BYDDF",0.55,0.55,"Tier 4: Monitor",73.5,73.5,73.5,0,0
+"JNJ",0.55,0.55,"Tier 4: Monitor",73.5,73.5,73.5,0,0
+"PG",0.55,0.55,"Tier 4: Monitor",73.5,73.5,73.5,0,0
+"AMD",0.55,0.55,"Tier 4: Monitor",76,76,76,0,0
+"DDOG",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"NET",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"OKTA",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"SNPS",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"SPOT",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"XIACF",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"ZS",0.525,0.525,"Tier 4: Monitor",80,80,80,0,0
+"NVDA",0.5,0.5,"Tier 4: Monitor",85.5,85.5,85.5,0,0
+"ORCL",0.5,0.5,"Tier 4: Monitor",85.5,85.5,85.5,0,0
+"PYPL",0.5,0.5,"Tier 4: Monitor",85.5,85.5,85.5,0,0
+"SIEGY",0.5,0.5,"Tier 4: Monitor",85.5,85.5,85.5,0,0
+"005380",0.475,0.475,"Tier 4: Monitor",90,90,90,0,0
+"7974",0.475,0.475,"Tier 4: Monitor",90,90,90,0,0
+"MSCI",0.475,0.475,"Tier 4: Monitor",90,90,90,0,0
+"PANW",0.475,0.475,"Tier 4: Monitor",90,90,90,0,0
+"TWLO",0.475,0.475,"Tier 4: Monitor",90,90,90,0,0
+"CVX",0.45,0.45,"Tier 4: Monitor",94,94,94,0,0
+"NSRGY",0.45,0.45,"Tier 4: Monitor",94,94,94,0,0
+"TSLA",0.45,0.45,"Tier 4: Monitor",94,94,94,0,0
+"MPNGF",0.45,0.45,"Tier 4: Monitor",96,96,96,0,0
+"005930",0.425,0.425,"Tier 4: Monitor",97.5,97.5,97.5,0,0
+"JBL",0.425,0.425,"Tier 4: Monitor",97.5,97.5,97.5,0,0
+"207940",0.4,0.4,"Tier 4: Monitor",99,99,99,0,0
+"000660",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"FSLY",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"HOOD",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"LRCX",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"SHOP",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"TOST",0.4,0.4,"Tier 4: Monitor",102.5,102.5,102.5,0,0
+"NFLX",0.375,0.375,"Tier 4: Monitor",106,106,106,0,0
+"051910",0.375,0.375,"Tier 4: Monitor",107,107,107,0,0
+"KYCCF",0.35,0.35,"Tier 4: Monitor",108,108,108,0,0
+"035420",NA,NA,"Tier 4: Monitor",109,109,109,0,0
+"035720",NA,NA,"Tier 4: Monitor",110,110,110,0,0
+"6501",NA,NA,"Tier 4: Monitor",111,111,111,0,0
+"8TRA",NA,NA,"Tier 4: Monitor",112,112,112,0,0
+"9984",NA,NA,"Tier 4: Monitor",113,113,113,0,0
+"AFRM",NA,NA,"Tier 4: Monitor",114,114,114,0,0
+"AMT",NA,NA,"Tier 4: Monitor",115,115,115,0,0
+"ANT",NA,NA,"Tier 4: Monitor",116,116,116,0,0
+"APO",NA,NA,"Tier 4: Monitor",117,117,117,0,0
+"ARES",NA,NA,"Tier 4: Monitor",118,118,118,0,0
+"AXP",NA,NA,"Tier 4: Monitor",119,119,119,0,0
+"AZN",NA,NA,"Tier 4: Monitor",120,120,120,0,0
+"BAC",NA,NA,"Tier 4: Monitor",121,121,121,0,0
+"BAM",NA,NA,"Tier 4: Monitor",122,122,122,0,0
+"BLK",NA,NA,"Tier 4: Monitor",123,123,123,0,0
+"BX",NA,NA,"Tier 4: Monitor",124,124,124,0,0
+"CBOE",NA,NA,"Tier 4: Monitor",125,125,125,0,0
+"CME",NA,NA,"Tier 4: Monitor",126,126,126,0,0
+"CRWD",NA,NA,"Tier 4: Monitor",127,127,127,0,0
+"DIS",NA,NA,"Tier 4: Monitor",128,128,128,0,0
+"DUK",NA,NA,"Tier 4: Monitor",129,129,129,0,0
+"EADSY",NA,NA,"Tier 4: Monitor",130,130,130,0,0
+"FANUY",NA,NA,"Tier 4: Monitor",131,131,131,0,0
+"FRCOY",NA,NA,"Tier 4: Monitor",132,132,132,0,0
+"GS",NA,NA,"Tier 4: Monitor",133,133,133,0,0
+"HD",NA,NA,"Tier 4: Monitor",134,134,134,0,0
+"HDB",NA,NA,"Tier 4: Monitor",135,135,135,0,0
+"HSBC",NA,NA,"Tier 4: Monitor",136,136,136,0,0
+"HTHIY",NA,NA,"Tier 4: Monitor",137,137,137,0,0
+"IBN",NA,NA,"Tier 4: Monitor",138,138,138,0,0
+"ICE",NA,NA,"Tier 4: Monitor",139,139,139,0,0
+"INF",NA,NA,"Tier 4: Monitor",140,140,140,0,0
+"INFY",NA,NA,"Tier 4: Monitor",141,141,141,0,0
+"ITOCY",NA,NA,"Tier 4: Monitor",142,142,142,0,0
+"J",NA,NA,"Tier 4: Monitor",143,143,143,0,0
+"JPM",NA,NA,"Tier 4: Monitor",144,144,144,0,0
+"KKR",NA,NA,"Tier 4: Monitor",145,145,145,0,0
+"KO",NA,NA,"Tier 4: Monitor",146,146,146,0,0
+"KSPI",NA,NA,"Tier 4: Monitor",147,147,147,0,0
+"LIN",NA,NA,"Tier 4: Monitor",148,148,148,0,0
+"LMT",NA,NA,"Tier 4: Monitor",149,149,149,0,0
+"MA",NA,NA,"Tier 4: Monitor",150,150,150,0,0
+"MC",NA,NA,"Tier 4: Monitor",151,151,151,0,0
+"MCD",NA,NA,"Tier 4: Monitor",152,152,152,0,0
+"MCO",NA,NA,"Tier 4: Monitor",153,153,153,0,0
+"MFG",NA,NA,"Tier 4: Monitor",154,154,154,0,0
+"MITSY",NA,NA,"Tier 4: Monitor",155,155,155,0,0
+"MKTX",NA,NA,"Tier 4: Monitor",156,156,156,0,0
+"MQ",NA,NA,"Tier 4: Monitor",157,157,157,0,0
+"MS",NA,NA,"Tier 4: Monitor",158,158,158,0,0
+"NDAQ",NA,NA,"Tier 4: Monitor",159,159,159,0,0
+"NEE",NA,NA,"Tier 4: Monitor",160,160,160,0,0
+"NIO",NA,NA,"Tier 4: Monitor",161,161,161,0,0
+"NTRS",NA,NA,"Tier 4: Monitor",162,162,162,0,0
+"NU",NA,NA,"Tier 4: Monitor",163,163,163,0,0
+"OR",NA,NA,"Tier 4: Monitor",164,164,164,0,0
+"PAGS",NA,NA,"Tier 4: Monitor",165,165,165,0,0
+"RELIANCE",NA,NA,"Tier 4: Monitor",166,166,166,0,0
+"RKUNY",NA,NA,"Tier 4: Monitor",167,167,167,0,0
+"SE",NA,NA,"Tier 4: Monitor",168,168,168,0,0
+"SFTBF",NA,NA,"Tier 4: Monitor",169,169,169,0,0
+"SMCAY",NA,NA,"Tier 4: Monitor",170,170,170,0,0
+"SMCI",NA,NA,"Tier 4: Monitor",171,171,171,0,0
+"SMFG",NA,NA,"Tier 4: Monitor",172,172,172,0,0
+"SOFI",NA,NA,"Tier 4: Monitor",173,173,173,0,0
+"SONY",NA,NA,"Tier 4: Monitor",174,174,174,0,0
+"SPGI",NA,NA,"Tier 4: Monitor",175,175,175,0,0
+"SQM",NA,NA,"Tier 4: Monitor",176,176,176,0,0
+"SSDOY",NA,NA,"Tier 4: Monitor",177,177,177,0,0
+"STNE",NA,NA,"Tier 4: Monitor",178,178,178,0,0
+"STT",NA,NA,"Tier 4: Monitor",179,179,179,0,0
+"T",NA,NA,"Tier 4: Monitor",180,180,180,0,0
+"TCEHY",NA,NA,"Tier 4: Monitor",181,181,181,0,0
+"TM",NA,NA,"Tier 4: Monitor",182,182,182,0,0
+"TME",NA,NA,"Tier 4: Monitor",183,183,183,0,0
+"TTDKY",NA,NA,"Tier 4: Monitor",184,184,184,0,0
+"TTE",NA,NA,"Tier 4: Monitor",185,185,185,0,0
+"TW",NA,NA,"Tier 4: Monitor",186,186,186,0,0
+"UNH",NA,NA,"Tier 4: Monitor",187,187,187,0,0
+"UPS",NA,NA,"Tier 4: Monitor",188,188,188,0,0
+"V",NA,NA,"Tier 4: Monitor",189,189,189,0,0
+"VIRT",NA,NA,"Tier 4: Monitor",190,190,190,0,0
+"VZ",NA,NA,"Tier 4: Monitor",191,191,191,0,0
+"WMT",NA,NA,"Tier 4: Monitor",192,192,192,0,0
