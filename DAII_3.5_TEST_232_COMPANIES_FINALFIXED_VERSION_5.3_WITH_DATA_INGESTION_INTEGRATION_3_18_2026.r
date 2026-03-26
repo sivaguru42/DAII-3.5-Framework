@@ -1185,34 +1185,51 @@ assign("benchmark_ai_results", benchmark_ai_results, envir = .GlobalEnv)
 
 cat("\n   ✅ Benchmark AI exposure analysis complete\n")
 
-# ============================================================================
-# SECTION 12: PERFORMANCE ATTRIBUTION
-# ============================================================================
+# -----------------------------------------------------------------------------
+# SECTION 12: PERFORMANCE ATTRIBUTION & BENCHMARK COMPARISON
+# -----------------------------------------------------------------------------
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("📈 SECTION 12: PERFORMANCE ATTRIBUTION\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Check if required modules and data exist
-if(file.exists("R/04_modules/05_performance_attribution.r")) {
-  source("R/04_modules/05_performance_attribution.r")
+source("R/04_modules/05_performance_attribution.r")
+
+# Initialize variables
+attribution_results <- NULL
+benchmark_comparison <- NULL
+
+# Check if benchmark returns are available in daily_ratios
+cat("   Checking for benchmark data in daily_ratios...\n")
+
+# daily_ratios has as_of_date (not date) and Ticker (capital T)
+if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(daily_ratios)) {
   
-  # Verify required data exists
-  if(exists("daily_ratios") && exists("portfolio_holdings") && exists("benchmark_constituents_list")) {
+  # Check if benchmark tickers exist
+  benchmarks_present <- c(".SPX", ".IXIC") %in% unique(daily_ratios$Ticker)
+  
+  if(all(benchmarks_present)) {
+    cat("   ✅ Benchmark tickers found in daily_ratios\n")
     
-    # Get benchmark returns from daily_ratios
-    cat("   Getting benchmark returns...\n")
-    benchmark_returns <- get_benchmark_data(
-      benchmarks = c(".SPX", ".IXIC"),
-      daily_ratios = daily_ratios
-    )
+    # Get benchmark returns with correct column mapping
+    benchmark_returns <- daily_ratios %>%
+      filter(Ticker %in% c(".SPX", ".IXIC")) %>%
+      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
+      arrange(ticker, date)
     
-    # Prepare returns data
-    returns_data <- daily_ratios %>%
-      select(date, ticker, daily_return = close_adj_return)
+    cat(sprintf("   Benchmark returns retrieved: %d rows\n", nrow(benchmark_returns)))
     
-    # Create holdings weights from portfolio_holdings
-    holdings_weights <- portfolio_holdings %>%
+    # Create holdings weights from company snapshot
+    holdings_weights <- snapshot %>%
+      left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+      filter(in_portfolio == TRUE) %>%
       select(Ticker = ticker, fund_weight)
+    
+    # Prepare returns data for all stocks
+    returns_data <- daily_ratios %>%
+      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
+      filter(!is.na(daily_return))
+    
+    cat(sprintf("   Returns data prepared: %d rows\n", nrow(returns_data)))
     
     # Calculate attribution (using S&P 500 as primary benchmark)
     cat("   Calculating performance attribution...\n")
@@ -1226,38 +1243,114 @@ if(file.exists("R/04_modules/05_performance_attribution.r")) {
       end_date = Sys.Date()
     )
     
+    # Create benchmark comparison
     if(!is.null(attribution_results)) {
-      # Create benchmark comparison table
-      benchmark_comparison_table <- create_benchmark_comparison(
-        daii_scored, 
-        attribution_results
-      )
-      
-      # Display summary
-      cat("\n📊 ATTRIBUTION METRICS:\n")
-      print(attribution_results$summary)
+      benchmark_comparison <- create_benchmark_comparison(snapshot, attribution_results)
       
       cat("\n📊 BENCHMARK COMPARISON:\n")
-      print(benchmark_comparison_table)
+      print(benchmark_comparison)
       
-      # Store for Section 11
-      assign("attribution_results", attribution_results, envir = .GlobalEnv)
-      assign("benchmark_comparison_table", benchmark_comparison_table, envir = .GlobalEnv)
+      # Save to run directory (CSV and RDS)
+      write.csv(benchmark_comparison, 
+                file.path(run_dir, paste0(run_timestamp, "_21_benchmark_comparison_detailed.csv")), 
+                row.names = FALSE)
+      saveRDS(attribution_results, 
+              file.path(run_dir, paste0(run_timestamp, "_22_attribution_results.rds")))
       
       cat("\n   ✅ Performance attribution complete\n")
+      
+      # ============================================================================
+      # ADD ATTRIBUTION SHEETS TO EXCEL WORKBOOK
+      # ============================================================================
+      # Load the existing workbook
+      excel_file <- file.path(run_dir, paste0(run_timestamp, "_00_complete_report.xlsx"))
+      
+      if(file.exists(excel_file)) {
+        # Load the workbook
+        wb <- loadWorkbook(excel_file)
+        
+        # Sheet 12: Performance Attribution (Daily Data)
+        addWorksheet(wb, "Performance Attribution")
+        writeData(wb, "Performance Attribution", attribution_results$attribution)
+        
+        # Sheet 13: Attribution Metrics (Summary)
+        addWorksheet(wb, "Attribution Metrics")
+        writeData(wb, "Attribution Metrics", attribution_results$summary)
+        
+        # Sheet 14: Benchmark Comparison
+        addWorksheet(wb, "Benchmark Comparison")
+        writeData(wb, "Benchmark Comparison", benchmark_comparison)
+        
+        # Sheet 15: Portfolio Concentration
+        addWorksheet(wb, "Portfolio Concentration")
+        
+        # Calculate portfolio concentration
+        portfolio_holdings <- snapshot %>%
+          left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+          filter(in_portfolio == TRUE) %>%
+          arrange(desc(fund_weight)) %>%
+          mutate(
+            cumulative_weight = cumsum(fund_weight),
+            rank = row_number()
+          ) %>%
+          select(rank, ticker, company_name, total_net_exposure_usd, fund_weight, cumulative_weight, ai_label)
+        
+        writeData(wb, "Portfolio Concentration", portfolio_holdings)
+        
+        # Format all new sheets
+        header_style <- createStyle(fontSize = 12, fontColour = "#FFFFFF", 
+                                    halign = "center", fgFill = "#2C3E50", textDecoration = "bold")
+        
+        new_sheets <- c("Performance Attribution", "Attribution Metrics", 
+                        "Benchmark Comparison", "Portfolio Concentration")
+        
+        for(sheet_name in new_sheets) {
+          # Get data dimensions
+          sheet_data <- wb[[sheet_name]]
+          if(!is.null(sheet_data) && ncol(sheet_data) > 0 && nrow(sheet_data) > 0) {
+            addStyle(wb, sheet_name, header_style, rows = 1, cols = 1:ncol(sheet_data), gridExpand = TRUE)
+            freezePane(wb, sheet_name, firstRow = TRUE)
+            setColWidths(wb, sheet_name, cols = 1:ncol(sheet_data), widths = "auto")
+          }
+        }
+        
+        # Save the updated workbook
+        saveWorkbook(wb, excel_file, overwrite = TRUE)
+        cat("   ✅ Updated Excel workbook with performance attribution sheets\n")
+        
+        # Print summary of new sheets
+        cat("\n   📊 New sheets added:\n")
+        cat("      - Performance Attribution: Daily portfolio vs benchmark returns\n")
+        cat("      - Attribution Metrics: Alpha, Beta, Sharpe, Information Ratio\n")
+        cat("      - Benchmark Comparison: Portfolio vs S&P 500, NASDAQ 100\n")
+        cat("      - Portfolio Concentration: Top holdings with cumulative weight\n")
+        
+      } else {
+        cat("   ⚠️ Excel workbook not found, attribution sheets not added\n")
+      }
+      # ============================================================================
+      
     } else {
       cat("   ⚠️ Insufficient data for attribution calculation\n")
     }
+    
   } else {
-    cat("   ⚠️ Missing required data for attribution:\n")
-    if(!exists("daily_ratios")) cat("      - daily_ratios not found\n")
-    if(!exists("portfolio_holdings")) cat("      - portfolio_holdings not found\n")
-    if(!exists("benchmark_constituents_list")) cat("      - benchmark_constituents_list not found\n")
+    cat("   ⚠️ Benchmark tickers not found in daily_ratios\n")
+    cat("      Available tickers starting with '.':\n")
+    dot_tickers <- unique(daily_ratios$Ticker[grepl("^\\.", daily_ratios$Ticker)])
+    if(length(dot_tickers) > 0) {
+      cat("      ", paste(dot_tickers, collapse = ", "), "\n")
+    } else {
+      cat("      No index tickers found. Performance attribution skipped.\n")
+    }
   }
+  
 } else {
-  cat("   ⚠️ Performance attribution module not found at R/04_modules/05_performance_attribution.r\n")
-  cat("   Skipping attribution calculation.\n")
+  cat("   ⚠️ daily_ratios missing required columns\n")
+  cat("      Available columns:", paste(names(daily_ratios)[1:10], collapse=", "), "...\n")
 }
+
+cat("\n   ✅ Performance attribution section complete\n")
 
 # =============================================================================
 # SECTION 11: OUTPUT GENERATION
@@ -2023,173 +2116,3 @@ if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm =
 }
 cat("🏁 PIPELINE EXECUTION COMPLETE\n")
 cat(paste(rep("=", 80), collapse = ""), "\n")
-
-# -----------------------------------------------------------------------------
-# SECTION 12: PERFORMANCE ATTRIBUTION & BENCHMARK COMPARISON
-# -----------------------------------------------------------------------------
-cat("\n", paste(rep("=", 80), collapse = ""), "\n")
-cat("📈 SECTION 12: PERFORMANCE ATTRIBUTION\n")
-cat(paste(rep("=", 80), collapse = ""), "\n\n")
-
-source("R/04_modules/05_performance_attribution.r")
-
-# Check if benchmark returns are available in daily_ratios
-cat("   Checking for benchmark data in daily_ratios...\n")
-
-# daily_ratios has as_of_date (not date) and Ticker (capital T)
-if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(daily_ratios)) {
-  
-  # Check if benchmark tickers exist
-  benchmarks_present <- c(".SPX", ".IXIC") %in% unique(daily_ratios$Ticker)
-  
-  if(all(benchmarks_present)) {
-    cat("   ✅ Benchmark tickers found in daily_ratios\n")
-    
-    # Get benchmark returns with correct column mapping
-    benchmark_returns <- daily_ratios %>%
-      filter(Ticker %in% c(".SPX", ".IXIC")) %>%
-      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
-      arrange(ticker, date)
-    
-    cat(sprintf("   Benchmark returns retrieved: %d rows\n", nrow(benchmark_returns)))
-    
-    # Create holdings weights from company snapshot
-    holdings_weights <- snapshot %>%
-      left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
-      filter(in_portfolio == TRUE) %>%
-      select(Ticker = ticker, fund_weight)
-    
-    # Prepare returns data for all stocks
-    returns_data <- daily_ratios %>%
-      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
-      filter(!is.na(daily_return))
-    
-    cat(sprintf("   Returns data prepared: %d rows\n", nrow(returns_data)))
-    
-    # Calculate attribution (using S&P 500 as primary benchmark)
-    cat("   Calculating performance attribution...\n")
-    attribution_results <- calculate_performance_attribution(
-      holdings_data = holdings_weights,
-      benchmark_data = benchmark_returns %>% 
-        filter(ticker == ".SPX") %>% 
-        select(date, benchmark_return = daily_return),
-      return_data = returns_data,
-      start_date = "2020-01-01",
-      end_date = Sys.Date()
-    )
-    
-    # Create benchmark comparison
-    if(!is.null(attribution_results)) {
-      benchmark_comparison <- create_benchmark_comparison(snapshot, attribution_results)
-      
-      cat("\n📊 BENCHMARK COMPARISON:\n")
-      print(benchmark_comparison)
-      
-      # Save to run directory (CSV and RDS)
-      write.csv(benchmark_comparison, 
-                file.path(run_dir, paste0(run_timestamp, "_21_benchmark_comparison_detailed.csv")), 
-                row.names = FALSE)
-      saveRDS(attribution_results, 
-              file.path(run_dir, paste0(run_timestamp, "_22_attribution_results.rds")))
-      
-      cat("\n   ✅ Performance attribution complete\n")
-    } else {
-      cat("   ⚠️ Insufficient data for attribution calculation\n")
-    }
-    
-  } else {
-    cat("   ⚠️ Benchmark tickers not found in daily_ratios\n")
-    cat("      Available tickers starting with '.':\n")
-    dot_tickers <- unique(daily_ratios$Ticker[grepl("^\\.", daily_ratios$Ticker)])
-    if(length(dot_tickers) > 0) {
-      cat("      ", paste(dot_tickers, collapse = ", "), "\n")
-    } else {
-      cat("      No index tickers found. Performance attribution skipped.\n")
-    }
-    attribution_results <- NULL
-  }
-  
-} else {
-  cat("   ⚠️ daily_ratios missing required columns\n")
-  cat("      Available columns:", paste(names(daily_ratios)[1:10], collapse=", "), "...\n")
-  attribution_results <- NULL
-}
-  
-  # ============================================================================
-  # ADD ATTRIBUTION SHEETS TO EXCEL WORKBOOK
-  # ============================================================================
-  # Load the existing workbook
-  excel_file <- file.path(run_dir, paste0(run_timestamp, "_00_complete_report.xlsx"))
-  
-  if(file.exists(excel_file)) {
-    # Load the workbook
-    wb <- loadWorkbook(excel_file)
-    
-    # Sheet 12: Performance Attribution (Daily Data)
-    addWorksheet(wb, "Performance Attribution")
-    writeData(wb, "Performance Attribution", attribution_results$attribution)
-    
-    # Sheet 13: Attribution Metrics (Summary)
-    addWorksheet(wb, "Attribution Metrics")
-    writeData(wb, "Attribution Metrics", attribution_results$summary)
-    
-    # Sheet 14: Benchmark Comparison
-    addWorksheet(wb, "Benchmark Comparison")
-    writeData(wb, "Benchmark Comparison", benchmark_comparison)
-    
-    # Sheet 15: Portfolio Concentration
-    addWorksheet(wb, "Portfolio Concentration")
-    
-    # Calculate portfolio concentration
-    portfolio_holdings <- snapshot %>%
-      left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
-      filter(in_portfolio == TRUE) %>%
-      arrange(desc(fund_weight)) %>%
-      mutate(
-        cumulative_weight = cumsum(fund_weight),
-        rank = row_number()
-      ) %>%
-      select(rank, ticker, company_name, total_net_exposure_usd, fund_weight, cumulative_weight, ai_label)
-    
-    writeData(wb, "Portfolio Concentration", portfolio_holdings)
-    
-    # Format all new sheets
-    header_style <- createStyle(fontSize = 12, fontColour = "#FFFFFF", 
-                                halign = "center", fgFill = "#2C3E50", textDecoration = "bold")
-    
-    new_sheets <- c("Performance Attribution", "Attribution Metrics", 
-                    "Benchmark Comparison", "Portfolio Concentration")
-    
-    for(sheet_name in new_sheets) {
-      # Get data dimensions
-      sheet_data <- wb[[sheet_name]]
-      if(!is.null(sheet_data) && ncol(sheet_data) > 0 && nrow(sheet_data) > 0) {
-        addStyle(wb, sheet_name, header_style, rows = 1, cols = 1:ncol(sheet_data), gridExpand = TRUE)
-        freezePane(wb, sheet_name, firstRow = TRUE)
-        setColWidths(wb, sheet_name, cols = 1:ncol(sheet_data), widths = "auto")
-      }
-    }
-    
-    # Save the updated workbook
-    saveWorkbook(wb, excel_file, overwrite = TRUE)
-    cat("   ✅ Updated Excel workbook with performance attribution sheets\n")
-    
-    # Print summary of new sheets
-    cat("\n   📊 New sheets added:\n")
-    cat("      - Performance Attribution: Daily portfolio vs benchmark returns\n")
-    cat("      - Attribution Metrics: Alpha, Beta, Sharpe, Information Ratio\n")
-    cat("      - Benchmark Comparison: Portfolio vs S&P 500, NASDAQ 100\n")
-    cat("      - Portfolio Concentration: Top holdings with cumulative weight\n")
-    
-  } else {
-    cat("   ⚠️ Excel workbook not found, attribution sheets not added\n")
-  }
-  # ============================================================================
-  
-  cat("\n   ✅ Attribution results saved to run directory\n")
-  
-} else {
-  cat("   ⚠️ Insufficient data for attribution calculation\n")
-}
-
-close_all_connections()
