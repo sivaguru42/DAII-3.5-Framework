@@ -1,33 +1,74 @@
 # =============================================================================
 # TRANSFORM: Handle Missing Values
-# Version: 1.0 | Date: 2026-03-11
-# Description: Imputes or fills missing values in the company snapshot with
-#              sensible defaults.
+# Version: 2.1 | Date: 2026-03-18
+# Description: Imputes missing values with reasonable defaults
 # =============================================================================
 
-#' Imputes missing values in the company snapshot.
-#'
-#' @param snapshot Dataframe output from calculate_company_features().
-#' @return The same dataframe with NAs filled.
-handle_missing_values <- function(snapshot) {
-
+handle_missing_values <- function(df) {
+  
   message("   [Transform] Handling missing values...")
-
-  # Calculate medians from the data for imputation
-  median_mcap <- median(snapshot$MKTCAP_USD, na.rm = TRUE)
-
-  snapshot <- snapshot %>%
+  
+  result <- df %>%
     dplyr::mutate(
-      # For R&D expense: use 3% of market cap if missing, else keep original
-      rd_expense = dplyr::if_else(is.na(rd_expense), MKTCAP_USD * 0.03, rd_expense),
-
-      # For patent activity: set missing to 0
-      patent_activity = dplyr::if_else(is.na(patent_count), 0, patent_count),
-
-      # Recalculate R&D intensity after imputation
-      rd_intensity = rd_expense / MKTCAP_USD
+      # R&D expense - if missing, estimate as 3% of market cap
+      rd_expense = dplyr::if_else(
+        is.na(rd_expense) | rd_expense == 0,
+        market_cap * 0.03,  # Changed from MKTCAP_USD to market_cap
+        rd_expense
+      ),
+      
+      # Revenue - if missing, estimate as 5x R&D (typical ratio)
+      revenue = dplyr::if_else(
+        is.na(revenue) | revenue == 0,
+        rd_expense * 5,
+        revenue
+      ),
+      
+      # Market cap - if missing, use median of portfolio companies
+      market_cap = dplyr::if_else(
+        is.na(market_cap) | market_cap == 0,
+        stats::median(market_cap[in_portfolio], na.rm = TRUE),
+        market_cap
+      ),
+      
+      # PE ratio - if missing, use sector median (simplified: overall median)
+      pe_ratio_fy = dplyr::if_else(
+        is.na(pe_ratio_fy) | pe_ratio_fy == 0,
+        stats::median(pe_ratio_fy[in_portfolio], na.rm = TRUE),
+        pe_ratio_fy
+      ),
+      
+      # Beta - if missing, use 1.0 (market average)
+      beta_5y = dplyr::if_else(
+        is.na(beta_5y) | beta_5y == 0,
+        1.0,
+        beta_5y
+      ),
+      
+      # Patent activity - if missing, set to 0
+      patent_activity = dplyr::if_else(
+        is.na(patent_activity),
+        0,
+        patent_activity
+      ),
+      
+      # Total return - if missing, use 10%
+      total_return = dplyr::if_else(
+        is.na(total_return),
+        0.10,
+        total_return
+      ),
+      
+      # Revenue growth - if missing, use 5%
+      revenue_growth = dplyr::if_else(
+        is.na(revenue_growth),
+        0.05,
+        revenue_growth
+      )
     )
-
-  message("   [Transform] Missing values handled.")
-  return(snapshot)
+  
+  message(sprintf("   [Transform] Missing values handled for %d companies", nrow(result)))
+  
+  return(result)
 }
+

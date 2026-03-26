@@ -1,123 +1,95 @@
-# ============================================================================
-# INGEST: Pull Daily Ratios from Refinitiv
-# ============================================================================
-
-source("C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\R\\scripts\\utils\\R_utils_warehouse_connection.r") 
+library(dplyr)
+source(here::here("R", "01_utils", "database_connection.r"))
 
 pull_daily_ratios <- function(company_map, start_date = "2024-01-01") {
-  message("📈 Pulling daily ratios...")
   
-  # Validate input
-  if(missing(company_map) || is.null(company_map)) {
-    stop("❌ company_map is required")
-  }
+  message("Pulling daily ratios...")
   
-  if(nrow(company_map) == 0) {
-    stop("❌ company_map is empty")
-  }
+  conn <- connect_research()
+  on.exit(dbDisconnect(conn), add = TRUE)
   
-  # Create ticker list for SQL IN clause
-  ticker_list <- paste0("'", paste(company_map$Ticker, collapse = "', '"), "'")
+  repno_list <- paste0("'", paste(company_map$RepNo, collapse = "', '"), "'")
   
-  # Build SQL query
   sql <- sprintf("
-    SELECT 
-        Ticker,
-        RepNo,
-        as_of_date,
-        -- Market Data
-        MKTCAP_USD,
-        Price_closing_or_last_bid,
-        Price_vs_50_Day_Average,
-        Price_vs_150_Day_Average,
-        Price_vs_200_Day_Average,
-        Price_percent_change_52_week,
-        Average_volume_10_day,
-        Average_volume_3_month,
-        -- Valuation
-        PE_ratio,
-        PB_ratio,
-        EV_to_EBITDA,
-        -- Risk
-        Beta_3Y_weekly,
-        Short_Interest_as_percent_of_float,
-        -- R&D
-        Research_and_Development_Expense_most_recent_fiscal_yearr,
-        Research_and_Development_Expense_trailing_12_month
-    FROM refinitiv.daily_ratios_and_values
-    WHERE Ticker IN (%s)
-      AND as_of_date >= '%s'
-    ORDER BY Ticker, as_of_date DESC
-  ", ticker_list, start_date)
+    SELECT
+        [RepNo],
+        [as_of_date],
+        [Market_capitalization]                                                AS market_cap,
+        [P_÷_E_excluding_extraordinary_items_most_recent_fiscal_yearr]        AS pe_ratio_fy,
+        [P_÷_E_excluding_extraordinary_items_TTM]                             AS pe_ratio_ttm,
+        [Price_to_Book_most_recent_fiscal_yearr]                              AS pb_ratio,
+        [Current_EV_÷_EBITDA]                                                 AS ev_ebitda,
+        [Current_EV_÷_Revenue]                                                AS ev_revenue,
+        [Beta_]                                                               AS beta_5y,
+        [3_Year_Weekly_Beta]                                                  AS beta_3y,
+        [Price_closing_or_last_bid]                                           AS close_price,
+        [Volume_avg._trading_volume_for_the_last_ten_days]                    AS avg_volume_10d,
+        [Dividend_Yield_indicated_annual_dividend_divided_by_closing_price]    AS div_yield,
+        [Return_on_average_equity_trailing_12_month]                          AS roe_ttm,
+        [Net_Profit_Margin_%%_trailing_12_month]                              AS net_margin_ttm,
+        [Revenue_trailing_12_month]                                           AS revenue_ttm,
+        [Free_Cash_Flow_trailing_12_month]                                    AS fcf_ttm,
+        [EPS_excluding_extraordinary_items_trailing_12_month]                 AS eps_ttm,
+        [Total_debt_most_recent_quarter]                                      AS total_debt,
+        [Cash_and_Equiv._most_recent_quarter]                                 AS cash_equiv,
+        [Price_52_week_price_percent_change]                                  AS price_52w_chg,
+        [Price_YTD_price_percent_change]                                      AS price_ytd_chg,
+        [Price_1_Day_%%_Change]                                               AS price_1d_pct_change,
+        [Price_5_Day_%%_Change]                                               AS price_5d_pct_change,
+        [Sharpe_Ratio_3_Year_Weekly]                                          AS sharpe_3y,
+        [Sharpe_Ratio_5_Year_Monthly]                                         AS sharpe_5y,
+        [Earnings_per_Share_Excluding_Extraordinary_Items_Avg._Diluted_Shares_Outstanding_5_Year_Interim_Trend_Volatility_%%] AS eps_trend_vol_5y,
+        [Revenue_Primary_5_Year_Interim_Trend_Volatility_%%]                  AS revenue_trend_vol_5y,
+        [Free_Cash_Flow_Levered_5_Year_Interim_Trend_Volatility_%%]           AS fcf_trend_vol_5y
+    FROM [refinitiv].[daily_ratios_and_values]
+    WHERE [RepNo] IN (%s)
+      AND [as_of_date] >= '%s'
+    ORDER BY [RepNo], [as_of_date] DESC
+  ", repno_list, start_date)
   
-  # CHANGED: Use explicit connection instead of query_warehouse()
-  message("   Connecting to Refinitiv database...")
+  message("  Querying refinitiv.daily_ratios_and_values...")
   
-  conn <- tryCatch({
-    connect_refinitiv()  # Connect to Refinitiv database
-  }, error = function(e) {
-    stop("❌ Failed to connect to Refinitiv database: ", e$message)
-  })
-  
-  # Execute query
   ratios <- tryCatch({
     dbGetQuery(conn, sql)
   }, error = function(e) {
-    dbDisconnect(conn)
-    stop("❌ Query failed: ", e$message)
+    stop("Query failed: ", e$message)
   })
   
-  # Close connection
-  dbDisconnect(conn)
+  message(sprintf("  Pulled %d daily ratio records", nrow(ratios)))
   
-  # Check results
-  if(nrow(ratios) == 0) {
-    warning("⚠️ No daily ratio records found for the specified tickers and date range")
-    return(data.frame())
+  # Join with ticker
+  ratios <- left_join(ratios, company_map[, c("RepNo", "Ticker")], by = "RepNo")
+  
+  # Calculate rolling volatility
+  if (nrow(ratios) > 0 && "price_1d_pct_change" %in% names(ratios)) {
+    
+    safe_sd <- function(x, min_obs = 15) {
+      valid <- x[!is.na(x)]
+      if (length(valid) < min_obs) return(NA_real_)
+      sd(valid)
+    }
+    
+    ratios <- ratios %>%
+      group_by(Ticker) %>%
+      arrange(as_of_date) %>%
+      mutate(
+        volatility_30d  = zoo::rollapply(price_1d_pct_change / 100, width = 22,
+                                         FUN = safe_sd, fill = NA, align = "right") * sqrt(252),
+        volatility_90d  = zoo::rollapply(price_1d_pct_change / 100, width = 63,
+                                         FUN = safe_sd, fill = NA, align = "right") * sqrt(252),
+        volatility_260d = zoo::rollapply(price_1d_pct_change / 100, width = 252,
+                                         FUN = function(x) safe_sd(x, min_obs = 180),
+                                         fill = NA, align = "right") * sqrt(252)
+      ) %>%
+      ungroup()
+    
+    message("  Calculated rolling volatility (30d/90d/260d annualized)")
   }
   
-  # Summary statistics
-  message(sprintf("✅ Pulled %d daily ratio records", nrow(ratios)))
-  message(sprintf("   Date range: %s to %s", 
-                  min(ratios$as_of_date, na.rm = TRUE), 
-                  max(ratios$as_of_date, na.rm = TRUE)))
-  message(sprintf("   Companies with data: %d", length(unique(ratios$Ticker))))
-  
-  # Save to raw data directory (using absolute paths)
-  save_path_rds <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\raw\\daily_ratios.rds"
-  save_path_csv <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\raw\\daily_ratios.csv"
-  
-  saveRDS(ratios, save_path_rds)
-  write.csv(ratios, save_path_csv, row.names = FALSE)
-  
-  message("✅ Saved RDS to: ", save_path_rds)
-  message("✅ Saved CSV to: ", save_path_csv)
+  save_path <- here::here("data", "01_raw", "daily_ratios.rds")
+  saveRDS(ratios, save_path)
+  message("  Saved to: ", save_path)
   
   return(ratios)
 }
 
-# Optional: Run directly if script is executed for testing
-if (interactive() && !exists("skip_run")) {
-  message("\n", paste(rep("=", 60), collapse = ""))
-  message("🔧 TESTING pull_daily_ratios FUNCTION")
-  message(paste(rep("=", 60), collapse = ""))
-  
-  # Try to load company map if it exists
-  map_path <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\reference\\company_repno_mapping.rds"
-  
-  if(file.exists(map_path)) {
-    test_map <- readRDS(map_path)
-    test_ratios <- pull_daily_ratios(test_map, start_date = "2024-01-01")
-    message("\n📊 Sample of pulled data:")
-    print(head(test_ratios[, 1:5]))
-  } else {
-    message("⚠️ Company map not found. Create a test map first.")
-    # Create minimal test map
-    test_map <- data.frame(
-      Ticker = c("NVDA US", "MSFT US", "AAPL US"),
-      RepNo = c(12345, 67890, 54321),
-      stringsAsFactors = FALSE
-    )
-    test_ratios <- pull_daily_ratios(test_map, start_date = "2024-01-01")
-  }
-}

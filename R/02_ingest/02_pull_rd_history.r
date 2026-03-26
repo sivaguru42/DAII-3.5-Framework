@@ -1,103 +1,95 @@
 # ============================================================================
-# INGEST: Pull 40-Year R&D History from Refinitiv
+# INGEST: Pull 40-Year Financial History from Refinitiv
+# Version: 4.0 | Date: 2026-03-16
+# Description: Pulls annual financials from research database using JSON extraction
 # ============================================================================
 
-# Load Azure connection utilities
-source("C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\R\\scripts\\utils\\R_utils_azure_connection.r")
+# Load database connection utilities
+source("R/01_utils/database_connection.R")
+library(dplyr)
+library(tidyr)
 
-pull_rd_history <- function(company_map) {
-  message("📊 Pulling 40-year R&D history...")
+#' Pull 40-year financial history for companies
+#' @param company_map Dataframe with Ticker and RepNo columns
+#' @return Dataframe with financial history
+#' @export
+pull_financial_history <- function(company_map) {
   
-  # Validate input
-  if(missing(company_map) || is.null(company_map)) {
-    stop("❌ company_map is required")
-  }
+  message("📊 Pulling 40-year financial history...")
   
-  if(nrow(company_map) == 0) {
-    stop("❌ company_map is empty")
-  }
+  # Connect to RESEARCH database (not the default)
+  conn <- connect_research()
   
-  # Create RepNo list for SQL IN clause
+  # Extract RepNos from company_map
+  # Use the RepNo column - we need to add this to company_map!
   repno_list <- paste0("'", paste(company_map$RepNo, collapse = "', '"), "'")
   
+  # Direct JSON extraction query (recommended by chatbot)
   sql <- sprintf("
     SELECT 
-        RepNo,
-        Statement_PeriodEndDate as fiscal_year_end,
-        MAX(CASE WHEN COA = 'ERAD' THEN FinancialValue END) as rd_expense,
-        MAX(CASE WHEN COA = 'REVT' THEN FinancialValue END) as revenue,
-        MAX(CASE WHEN COA = 'OI' THEN FinancialValue END) as operating_income,
-        MAX(CASE WHEN COA = 'NI' THEN FinancialValue END) as net_income
-    FROM refinitiv.class20_stdann_itemized_stmt
-    WHERE RepNo IN (%s)
-      AND Statement_PeriodEndDate BETWEEN '1980-01-01' AND '2025-12-31'
-      AND COA IN ('ERAD', 'REVT', 'OI', 'NI')
-    GROUP BY RepNo, Statement_PeriodEndDate
-    ORDER BY RepNo, Statement_PeriodEndDate DESC
+        s.RepNo,
+        s.Statement_PeriodEndDate AS fiscal_year_end,
+        s.Statement_Type,
+        s.Currencies_ConvertedTo AS currency,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SREV') AS revenue,
+        JSON_VALUE(s.FinancialValuesJSON, '$.ERAD') AS rd_expense,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SGRP') AS gross_profit,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SSGA') AS sga_expense,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SOPI') AS operating_income,
+        JSON_VALUE(s.FinancialValuesJSON, '$.EIBT') AS net_income_before_tax,
+        JSON_VALUE(s.FinancialValuesJSON, '$.TIAT') AS net_income,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SDBF') AS diluted_eps,
+        JSON_VALUE(s.FinancialValuesJSON, '$.SBDA') AS normalized_ebitda
+    FROM research.refinitiv.class20_stdann_stmt s
+    WHERE s.RepNo IN (%s)
+      AND s.Statement_Type = 'INC'  -- Income Statement only
+      AND s.Statement_PeriodEndDate >= '1980-01-01'
+    ORDER BY s.RepNo, s.Statement_PeriodEndDate DESC
   ", repno_list)
   
-  # Connect to Refinitiv database
-  conn <- tryCatch({
-    connect_refinitiv()
-  }, error = function(e) {
-    stop("❌ Failed to connect to Refinitiv database: ", e$message)
-  })
+  message("   Querying research database for financial history...")
   
-  # Execute query
-  rd_history <- tryCatch({
+  raw_data <- tryCatch({
     dbGetQuery(conn, sql)
   }, error = function(e) {
-    dbDisconnect(conn)
+# dbDisconnect(conn)  # REMOVED for persistent connection
     stop("❌ Query failed: ", e$message)
   })
   
-  # Close connection
-  dbDisconnect(conn)
+# dbDisconnect(conn)  # REMOVED for persistent connection
   
-  # Check results
-  if(nrow(rd_history) == 0) {
-    warning("⚠️ No R&D history found for the specified companies")
-    return(data.frame())
-  }
+  message(sprintf("   ✅ Pulled %d rows of historical data", nrow(raw_data)))
+  
+  # Convert JSON values from character to numeric
+  financial_history <- raw_data %>%
+    mutate(across(c(revenue, rd_expense, gross_profit, sga_expense, 
+                    operating_income, net_income_before_tax, net_income,
+                    diluted_eps, normalized_ebitda), as.numeric))
   
   # Join with ticker from company_map
-  rd_history <- rd_history %>%
+  financial_history <- financial_history %>%
     left_join(company_map[, c("RepNo", "Ticker")], by = "RepNo")
   
-  message(sprintf("✅ Pulled %d rows of historical data", nrow(rd_history)))
-  message(sprintf("   Date range: %s to %s", 
-                  min(rd_history$fiscal_year_end, na.rm = TRUE), 
-                  max(rd_history$fiscal_year_end, na.rm = TRUE)))
-  message(sprintf("   Companies with data: %d", length(unique(rd_history$Ticker))))
+  message(sprintf("   ✅ Processed %d company-year records", nrow(financial_history)))
   
-  # Save
-  save_path_rds <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\raw\\rd_history_40yr.rds"
-  save_path_csv <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\raw\\rd_history_40yr.csv"
+  # Show sample for NVIDIA
+  if (nrow(financial_history) > 0) {
+    message("\n📋 Sample data for NVDA (most recent 5 years):")
+    nvda_sample <- financial_history %>% 
+      filter(Ticker == "NVDA") %>%
+      arrange(desc(fiscal_year_end)) %>%
+      select(Ticker, fiscal_year_end, revenue, rd_expense, net_income) %>%
+      head(5)
+    print(nvda_sample)
+  }
   
-  saveRDS(rd_history, save_path_rds)
-  write.csv(rd_history, save_path_csv, row.names = FALSE)
+  # Save to raw data folder
+  save_path <- "C:/Users/sganesan/DAII-3.5-Framework/data/01_raw/financial_history_40yr.rds"
+  saveRDS(financial_history, save_path)
+  message("\n   ✅ Saved to: ", save_path)
   
-  message("✅ Saved RDS to: ", save_path_rds)
-  message("✅ Saved CSV to: ", save_path_csv)
-  
-  return(rd_history)
+  return(financial_history)
 }
 
-# Optional: Run directly if script is executed for testing
-if (interactive() && !exists("skip_run")) {
-  message("\n", paste(rep("=", 60), collapse = ""))
-  message("🔧 TESTING pull_rd_history FUNCTION")
-  message(paste(rep("=", 60), collapse = ""))
-  
-  # Try to load company map if it exists
-  map_path <- "C:\\Users\\sganesan\\OneDrive - dumac.duke.edu\\DAII\\data\\reference\\company_repno_mapping.rds"
-  
-  if(file.exists(map_path)) {
-    test_map <- readRDS(map_path)
-    test_history <- pull_rd_history(test_map)
-    message("\n📊 Sample of pulled data:")
-    print(head(test_history))
-  } else {
-    message("⚠️ Company map not found. Run R_ingest_build_company_resolution.r first")
-  }
-}
+# Alias for backward compatibility
+pull_rd_history <- pull_financial_history
