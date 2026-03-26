@@ -349,9 +349,9 @@ cat("\n✅ Live snapshot saved to:", snapshot_file, "\n")
 # -----------------------------------------------------------------------------
 daii_raw_data <- master_snapshot
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # SECTION 2: LOAD HOLDINGS DATA (FIXED VERSION)
-# -----------------------------------------------------------------------------
+# =============================================================================
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("🏦 SECTION 2: LOADING DUMAC HOLDINGS DATA\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
@@ -388,15 +388,18 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   
   message(sprintf("   Stock holdings: %d securities (%.1f%%)", 
                   nrow(holdings_clean),
-                  nrow(holdings_clean) / nrow(holdings_aggregated) * 100))
+                  ifelse(nrow(holdings_aggregated) > 0, 
+                         nrow(holdings_clean) / nrow(holdings_aggregated) * 100, 0)))
   
-  # Step 2: Prepare company map for matching
+  # Step 2: Prepare company map for matching (CREATE lookup_name HERE)
   company_lookup <- company_map_input %>%
     mutate(
       lookup_name = toupper(gsub(" Inc$| Corp$| Ltd$| LLC$| PLC$| Co$| Company$", 
                                  "", CompanyName)),
       lookup_name = trimws(lookup_name)
     )
+  
+  message(sprintf("   Company lookup created: %d companies", nrow(company_lookup)))
   
   # Step 3: Match by ISIN (primary method)
   matches_isin <- company_lookup %>%
@@ -412,21 +415,33 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   message(sprintf("   ISIN matches: %d companies", nrow(matches_isin)))
   
   # Step 4: Match remaining by company name
-  unmatched_companies <- company_lookup %>%
-    filter(!Ticker %in% matches_isin$Ticker)
-  
-  matches_name <- holdings_clean %>%
-    filter(!ISIN %in% company_lookup$ISIN[company_lookup$Ticker %in% matches_isin$Ticker]) %>%
-    inner_join(unmatched_companies, by = "lookup_name", relationship = "many-to-many") %>%
-    group_by(Ticker) %>%
-    summarise(
-      total_net_exposure_usd = sum(total_net_exposure_usd, na.rm = TRUE),
-      total_net_pct_ltp = sum(total_net_pct_ltp, na.rm = TRUE),
-      n_funds = sum(n_funds, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  message(sprintf("   Name matches: %d companies", nrow(matches_name)))
+  if(nrow(company_lookup) > 0 && nrow(holdings_clean) > 0) {
+    
+    unmatched_companies <- company_lookup %>%
+      filter(!Ticker %in% matches_isin$Ticker)
+    
+    # Filter holdings that weren't matched by ISIN
+    matched_isin_tickers <- company_lookup %>%
+      filter(Ticker %in% matches_isin$Ticker) %>%
+      pull(ISIN)
+    
+    matches_name <- holdings_clean %>%
+      filter(!ISIN %in% matched_isin_tickers) %>%
+      inner_join(unmatched_companies, by = c("clean_name" = "lookup_name"), 
+                 relationship = "many-to-many") %>%
+      group_by(Ticker) %>%
+      summarise(
+        total_net_exposure_usd = sum(total_net_exposure_usd, na.rm = TRUE),
+        total_net_pct_ltp = sum(total_net_pct_ltp, na.rm = TRUE),
+        n_funds = sum(n_funds, na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    message(sprintf("   Name matches: %d companies", nrow(matches_name)))
+  } else {
+    matches_name <- data.frame()
+    message("   Name matches: 0 companies")
+  }
   
   # Step 5: Combine all matches
   all_matches <- bind_rows(matches_isin, matches_name) %>%
@@ -435,11 +450,19 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   # Step 6: Calculate portfolio weights
   total_portfolio <- sum(all_matches$total_net_exposure_usd, na.rm = TRUE)
   
-  all_matches <- all_matches %>%
-    mutate(
-      fund_weight = total_net_exposure_usd / total_portfolio,
-      in_portfolio = TRUE
-    )
+  if(total_portfolio > 0 && nrow(all_matches) > 0) {
+    all_matches <- all_matches %>%
+      mutate(
+        fund_weight = total_net_exposure_usd / total_portfolio,
+        in_portfolio = TRUE
+      )
+  } else {
+    all_matches <- all_matches %>%
+      mutate(
+        fund_weight = 0,
+        in_portfolio = FALSE
+      )
+  }
   
   message(sprintf("   Total matched: %d companies", nrow(all_matches)))
   message(sprintf("   Total portfolio value: $%s", 
