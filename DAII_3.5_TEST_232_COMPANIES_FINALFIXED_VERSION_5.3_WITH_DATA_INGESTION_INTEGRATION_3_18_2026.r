@@ -1912,10 +1912,81 @@ cat("\n   ✅ Excel workbook saved: ", basename(excel_file), "\n")
 cat("   📊 Workbook contains", length(names(wb)), "sheets\n")
 
 # -----------------------------------------------------------------------------
-# 6.9 Summary Report
+# 6.9 Summary Report - UPDATED with Imputation Warning
 # -----------------------------------------------------------------------------
 cat("\n📊 GENERATING SUMMARY REPORT\n")
 
+# Calculate additional metrics for summary
+attribution_summary <- ""
+if(exists("attribution_results") && !is.null(attribution_results)) {
+  attribution_summary <- paste(
+    "\n## 📈 PERFORMANCE ATTRIBUTION\n",
+    sprintf("- Total Return: %.2f%%\n", attribution_results$metrics$total_return * 100),
+    sprintf("- Alpha (vs S&P 500): %.2f%%\n", attribution_results$metrics$alpha * 100),
+    sprintf("- Beta: %.2f\n", attribution_results$metrics$beta),
+    sprintf("- Information Ratio: %.2f\n", attribution_results$metrics$information_ratio),
+    sprintf("- Sharpe Ratio: %.2f\n", attribution_results$metrics$sharpe_ratio),
+    sprintf("- Win Rate: %.1f%%\n", attribution_results$metrics$win_rate),
+    sep = ""
+  )
+}
+
+# Benchmark AI exposure summary
+benchmark_ai_summary <- ""
+if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison)) {
+  portfolio_row <- ai_exposure_comparison[ai_exposure_comparison$name == "DUMAC Portfolio", ]
+  sp500_row <- ai_exposure_comparison[ai_exposure_comparison$name == "S&P 500", ]
+  nasdaq_row <- ai_exposure_comparison[ai_exposure_comparison$name == "NASDAQ 100", ]
+  
+  benchmark_ai_summary <- paste(
+    "\n## 🤖 BENCHMARK AI EXPOSURE\n",
+    sprintf("- Portfolio AI Score: %.3f\n", ifelse(nrow(portfolio_row) > 0, portfolio_row$weighted_ai_score, NA)),
+    sprintf("- S&P 500 AI Score: %.3f\n", ifelse(nrow(sp500_row) > 0, sp500_row$weighted_ai_score, NA)),
+    sprintf("- NASDAQ 100 AI Score: %.3f\n", ifelse(nrow(nasdaq_row) > 0, nasdaq_row$weighted_ai_score, NA)),
+    sprintf("- Portfolio AI Leaders: %.1f%%\n", ifelse(nrow(portfolio_row) > 0, portfolio_row$pct_ai_leaders, NA)),
+    sprintf("- S&P 500 AI Leaders: %.1f%%\n", ifelse(nrow(sp500_row) > 0, sp500_row$pct_ai_leaders, NA)),
+    sprintf("- NASDAQ 100 AI Leaders: %.1f%%\n", ifelse(nrow(nasdaq_row) > 0, nasdaq_row$pct_ai_leaders, NA)),
+    sep = ""
+  )
+}
+
+# Portfolio concentration summary
+portfolio_concentration <- ""
+if(exists("portfolio_holdings") && nrow(portfolio_holdings) > 0) {
+  top_3_weight <- portfolio_holdings %>%
+    arrange(desc(fund_weight)) %>%
+    slice(1:3) %>%
+    summarise(total_weight = sum(fund_weight, na.rm = TRUE)) %>%
+    pull(total_weight)
+  
+  portfolio_concentration <- sprintf("- Top 3 Holdings Concentration: %.1f%%\n", top_3_weight * 100)
+}
+
+# Imputation warning section
+imputation_warning <- ""
+if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+  
+  imputed_count <- sum(portfolio_holdings$score_imputed, na.rm = TRUE)
+  imputed_list <- portfolio_holdings %>%
+    filter(score_imputed == TRUE) %>%
+    arrange(ticker) %>%
+    pull(ticker)
+  
+  imputation_warning <- paste(
+    "\n## ⚠️ DATA QUALITY NOTE - IMPUTED SCORES\n",
+    sprintf("**%d portfolio companies** had missing AI/innovation scores and were imputed:\n", imputed_count),
+    paste("  -", paste(imputed_list, collapse = ", "), "\n"),
+    "\n**Imputation Methodology:**\n",
+    "  - Innovation Score: Estimated using patent activity (log-normalized) with baseline of 0.3\n",
+    "  - AI Score: Estimated using patent activity or revenue growth, with baseline of 0.25\n",
+    "  - AI Label: Assigned based on imputed AI score thresholds\n",
+    "  - Growth & Volatility: Default values (0% growth, 0.5 volatility) where missing\n",
+    "\n*These estimates should be considered directional. See Metadata sheet for full methodology.*\n",
+    sep = ""
+  )
+}
+
+# Build the complete summary report
 summary_report <- paste(
   sprintf("# DAII 3.5 Run Summary – %s\n\n", run_timestamp),
   "## 📊 OVERVIEW\n",
@@ -1926,42 +1997,17 @@ summary_report <- paste(
   sprintf("- Anomalies Detected: %d\n", sum(daii_scored$is_anomaly, na.rm = TRUE)),
   sprintf("- Unicorn Candidates: %d\n", 
           ifelse(exists("unicorn_watchlist"), nrow(unicorn_watchlist), 0)),
-  "\n## 📈 PERFORMANCE ATTRIBUTION\n",
-  if(exists("attribution_results") && !is.null(attribution_results)) {
-    paste(
-      sprintf("- Total Return: %.2f%%\n", attribution_results$metrics$total_return * 100),
-      sprintf("- Alpha (vs S&P 500): %.2f%%\n", attribution_results$metrics$alpha * 100),
-      sprintf("- Beta: %.2f\n", attribution_results$metrics$beta),
-      sprintf("- Information Ratio: %.2f\n", attribution_results$metrics$information_ratio),
-      sprintf("- Sharpe Ratio: %.2f\n", attribution_results$metrics$sharpe_ratio),
-      sep = ""
-    )
-  } else {
-    "- Performance attribution not available\n"
-  },
-  "\n## 🤖 BENCHMARK AI EXPOSURE\n",
-  if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison)) {
-    paste(
-      sprintf("- Portfolio AI Score: %.3f\n", 
-              ai_exposure_comparison$weighted_ai_score[ai_exposure_comparison$name == "DUMAC Portfolio"]),
-      sprintf("- S&P 500 AI Score: %.3f\n", 
-              ai_exposure_comparison$weighted_ai_score[ai_exposure_comparison$name == "S&P 500"]),
-      sprintf("- NASDAQ 100 AI Score: %.3f\n", 
-              ai_exposure_comparison$weighted_ai_score[ai_exposure_comparison$name == "NASDAQ 100"]),
-      sprintf("- Active Share vs S&P 500: %.1f%%\n", 
-              ai_exposure_comparison$active_share[ai_exposure_comparison$name == "S&P 500"] * 100),
-      sep = ""
-    )
-  } else {
-    "- Benchmark AI exposure not available\n"
-  },
+  portfolio_concentration,
+  attribution_summary,
+  benchmark_ai_summary,
+  imputation_warning,
   "\n## 📁 OUTPUT FILES\n",
   paste(sprintf("- %s", list.files(run_dir)), collapse = "\n"),
   "\n\n## 🔧 CONFIGURATION\n",
   sprintf("- Run Date: %s\n", run_timestamp),
   sprintf("- Pipeline Version: 5.3 FINAL\n"),
   sprintf("- Companies in Portfolio: %d\n", sum(daii_scored$in_portfolio, na.rm = TRUE)),
-  sprintf("- Excel Sheets: %d\n", length(names(wb))),
+  sprintf("- Excel Sheets: %d\n", ifelse(exists("wb"), length(names(wb)), 0)),
   sep = ""
 )
 
@@ -1970,9 +2016,14 @@ writeLines(summary_report, file.path(run_dir, "README.md"))
 cat("\n✅✅✅ ALL OUTPUTS GENERATED SUCCESSFULLY\n")
 cat("   Run directory:", run_dir, "\n")
 cat("   Output files:", length(list.files(run_dir)), "\n")
-cat("   Excel workbook sheets:", length(names(wb)), "\n")
+if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+  cat("   ⚠️ Note:", sum(portfolio_holdings$score_imputed, na.rm = TRUE), 
+      "portfolio companies had imputed AI scores\n")
+  cat("      See Metadata sheet or README.md for details\n")
+}
 cat("🏁 PIPELINE EXECUTION COMPLETE\n")
 cat(paste(rep("=", 80), collapse = ""), "\n")
+
 # -----------------------------------------------------------------------------
 # SECTION 12: PERFORMANCE ATTRIBUTION & BENCHMARK COMPARISON
 # -----------------------------------------------------------------------------
@@ -1982,46 +2033,87 @@ cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
 source("R/04_modules/05_performance_attribution.r")
 
-# Get benchmark data from daily_ratios
-benchmark_returns <- get_benchmark_data(
-  benchmarks = c(".SPX", ".IXIC"),
-  daily_ratios = daily_ratios
-)
+# Check if benchmark returns are available in daily_ratios
+cat("   Checking for benchmark data in daily_ratios...\n")
 
-# Create holdings weights from company snapshot
-holdings_weights <- snapshot %>%
-  left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
-  filter(in_portfolio == TRUE) %>%
-  select(Ticker = ticker, fund_weight)
-
-# Prepare returns data
-returns_data <- daily_ratios %>%
-  select(date, ticker, daily_return = close_adj_return)
-
-# Calculate attribution (using S&P 500 as primary benchmark)
-attribution_results <- calculate_performance_attribution(
-  holdings_data = holdings_weights,
-  benchmark_data = benchmark_returns %>% 
-    filter(ticker == ".SPX") %>% 
-    select(date, benchmark_return = daily_return),
-  return_data = returns_data,
-  start_date = "2020-01-01",
-  end_date = Sys.Date()
-)
-
-# Create benchmark comparison
-if(!is.null(attribution_results)) {
-  benchmark_comparison <- create_benchmark_comparison(snapshot, attribution_results)
+# daily_ratios has as_of_date (not date) and Ticker (capital T)
+if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(daily_ratios)) {
   
-  cat("\n📊 BENCHMARK COMPARISON:\n")
-  print(benchmark_comparison)
+  # Check if benchmark tickers exist
+  benchmarks_present <- c(".SPX", ".IXIC") %in% unique(daily_ratios$Ticker)
   
-  # Save to run directory (CSV and RDS)
-  write.csv(benchmark_comparison, 
-            file.path(run_dir, paste0(run_timestamp, "_21_benchmark_comparison_detailed.csv")), 
-            row.names = FALSE)
-  saveRDS(attribution_results, 
-          file.path(run_dir, paste0(run_timestamp, "_22_attribution_results.rds")))
+  if(all(benchmarks_present)) {
+    cat("   ✅ Benchmark tickers found in daily_ratios\n")
+    
+    # Get benchmark returns with correct column mapping
+    benchmark_returns <- daily_ratios %>%
+      filter(Ticker %in% c(".SPX", ".IXIC")) %>%
+      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
+      arrange(ticker, date)
+    
+    cat(sprintf("   Benchmark returns retrieved: %d rows\n", nrow(benchmark_returns)))
+    
+    # Create holdings weights from company snapshot
+    holdings_weights <- snapshot %>%
+      left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+      filter(in_portfolio == TRUE) %>%
+      select(Ticker = ticker, fund_weight)
+    
+    # Prepare returns data for all stocks
+    returns_data <- daily_ratios %>%
+      select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change) %>%
+      filter(!is.na(daily_return))
+    
+    cat(sprintf("   Returns data prepared: %d rows\n", nrow(returns_data)))
+    
+    # Calculate attribution (using S&P 500 as primary benchmark)
+    cat("   Calculating performance attribution...\n")
+    attribution_results <- calculate_performance_attribution(
+      holdings_data = holdings_weights,
+      benchmark_data = benchmark_returns %>% 
+        filter(ticker == ".SPX") %>% 
+        select(date, benchmark_return = daily_return),
+      return_data = returns_data,
+      start_date = "2020-01-01",
+      end_date = Sys.Date()
+    )
+    
+    # Create benchmark comparison
+    if(!is.null(attribution_results)) {
+      benchmark_comparison <- create_benchmark_comparison(snapshot, attribution_results)
+      
+      cat("\n📊 BENCHMARK COMPARISON:\n")
+      print(benchmark_comparison)
+      
+      # Save to run directory (CSV and RDS)
+      write.csv(benchmark_comparison, 
+                file.path(run_dir, paste0(run_timestamp, "_21_benchmark_comparison_detailed.csv")), 
+                row.names = FALSE)
+      saveRDS(attribution_results, 
+              file.path(run_dir, paste0(run_timestamp, "_22_attribution_results.rds")))
+      
+      cat("\n   ✅ Performance attribution complete\n")
+    } else {
+      cat("   ⚠️ Insufficient data for attribution calculation\n")
+    }
+    
+  } else {
+    cat("   ⚠️ Benchmark tickers not found in daily_ratios\n")
+    cat("      Available tickers starting with '.':\n")
+    dot_tickers <- unique(daily_ratios$Ticker[grepl("^\\.", daily_ratios$Ticker)])
+    if(length(dot_tickers) > 0) {
+      cat("      ", paste(dot_tickers, collapse = ", "), "\n")
+    } else {
+      cat("      No index tickers found. Performance attribution skipped.\n")
+    }
+    attribution_results <- NULL
+  }
+  
+} else {
+  cat("   ⚠️ daily_ratios missing required columns\n")
+  cat("      Available columns:", paste(names(daily_ratios)[1:10], collapse=", "), "...\n")
+  attribution_results <- NULL
+}
   
   # ============================================================================
   # ADD ATTRIBUTION SHEETS TO EXCEL WORKBOOK
