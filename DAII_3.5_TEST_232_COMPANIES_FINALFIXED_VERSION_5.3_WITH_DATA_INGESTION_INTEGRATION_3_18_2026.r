@@ -350,13 +350,13 @@ cat("\n✅ Live snapshot saved to:", snapshot_file, "\n")
 daii_raw_data <- master_snapshot
 
 # =============================================================================
-# SECTION 2: LOAD HOLDINGS DATA (FIXED VERSION)
+# SECTION 2: LOAD HOLDINGS DATA (FIXED VERSION - ALL COMPANIES RETAINED)
 # =============================================================================
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("🏦 SECTION 2: LOADING DUMAC HOLDINGS DATA\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Function to process holdings with fixed merge logic
+# Function to process holdings with fixed merge logic - RETAINS ALL COMPANIES
 process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.rds",
                                   company_map_input = NULL) {
   
@@ -399,34 +399,42 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
       lookup_name = trimws(lookup_name)
     )
   
-  message(sprintf("   Company lookup created: %d companies", nrow(company_lookup)))
+  message(sprintf("   Company universe: %d companies", nrow(company_lookup)))
   
-  # Step 3: Match by ISIN (primary method)
+  # Step 3: Match by ISIN (primary method) - use LEFT JOIN to keep ALL companies
   matches_isin <- company_lookup %>%
-    inner_join(holdings_clean, by = "ISIN", relationship = "many-to-many") %>%
+    left_join(holdings_clean, by = "ISIN", relationship = "many-to-many") %>%
     group_by(Ticker) %>%
     summarise(
       total_net_exposure_usd = sum(total_net_exposure_usd, na.rm = TRUE),
       total_net_pct_ltp = sum(total_net_pct_ltp, na.rm = TRUE),
       n_funds = sum(n_funds, na.rm = TRUE),
+      matched_by = "ISIN",
       .groups = "drop"
     )
   
-  message(sprintf("   ISIN matches: %d companies", nrow(matches_isin)))
+  message(sprintf("   ISIN matches: %d companies", sum(matches_isin$total_net_exposure_usd > 0, na.rm = TRUE)))
   
-  # Step 4: Match remaining by company name
+  # Step 4: Match remaining by company name (for those not matched by ISIN)
   if(nrow(company_lookup) > 0 && nrow(holdings_clean) > 0) {
     
+    # Identify companies not yet matched
+    companies_without_isin_match <- matches_isin %>%
+      filter(total_net_exposure_usd == 0 | is.na(total_net_exposure_usd)) %>%
+      pull(Ticker)
+    
     unmatched_companies <- company_lookup %>%
-      filter(!Ticker %in% matches_isin$Ticker)
+      filter(Ticker %in% companies_without_isin_match)
     
     # Filter holdings that weren't matched by ISIN
     matched_isin_tickers <- company_lookup %>%
-      filter(Ticker %in% matches_isin$Ticker) %>%
+      filter(Ticker %in% matches_isin$Ticker[matches_isin$total_net_exposure_usd > 0]) %>%
       pull(ISIN)
     
-    matches_name <- holdings_clean %>%
-      filter(!ISIN %in% matched_isin_tickers) %>%
+    holdings_for_name_match <- holdings_clean %>%
+      filter(!ISIN %in% matched_isin_tickers)
+    
+    matches_name <- holdings_for_name_match %>%
       inner_join(unmatched_companies, by = c("clean_name" = "lookup_name"), 
                  relationship = "many-to-many") %>%
       group_by(Ticker) %>%
@@ -434,55 +442,65 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
         total_net_exposure_usd = sum(total_net_exposure_usd, na.rm = TRUE),
         total_net_pct_ltp = sum(total_net_pct_ltp, na.rm = TRUE),
         n_funds = sum(n_funds, na.rm = TRUE),
+        matched_by = "NAME",
         .groups = "drop"
       )
     
     message(sprintf("   Name matches: %d companies", nrow(matches_name)))
+    
+    # Merge name matches into matches_isin
+    matches_isin <- matches_isin %>%
+      left_join(matches_name, by = "Ticker", suffix = c("", "_name")) %>%
+      mutate(
+        total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd_name), total_net_exposure_usd, total_net_exposure_usd_name),
+        total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp_name), total_net_pct_ltp, total_net_pct_ltp_name),
+        n_funds = ifelse(is.na(n_funds_name), n_funds, n_funds_name),
+        matched_by = ifelse(is.na(matched_by_name), matched_by, "NAME")
+      ) %>%
+      select(-ends_with("_name"))
+    
   } else {
-    matches_name <- data.frame()
     message("   Name matches: 0 companies")
   }
   
-  # Step 5: Combine all matches
-  all_matches <- bind_rows(matches_isin, matches_name) %>%
-    distinct(Ticker, .keep_all = TRUE)
+  # Step 5: Calculate portfolio weights (based ONLY on companies with holdings)
+  total_portfolio <- sum(matches_isin$total_net_exposure_usd, na.rm = TRUE)
   
-  # Step 6: Calculate portfolio weights
-  total_portfolio <- sum(all_matches$total_net_exposure_usd, na.rm = TRUE)
+  holdings_lookup <- matches_isin %>%
+    mutate(
+      # Replace NA with 0
+      total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd), 0, total_net_exposure_usd),
+      total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp), 0, total_net_pct_ltp),
+      n_funds = ifelse(is.na(n_funds), 0, n_funds),
+      matched_by = ifelse(is.na(matched_by), "NONE", matched_by),
+      # Portfolio flag and weight
+      in_portfolio = total_net_exposure_usd != 0,
+      fund_weight = ifelse(in_portfolio, total_net_exposure_usd / total_portfolio, 0)
+    )
   
-  if(total_portfolio > 0 && nrow(all_matches) > 0) {
-    all_matches <- all_matches %>%
-      mutate(
-        fund_weight = total_net_exposure_usd / total_portfolio,
-        in_portfolio = TRUE
-      )
-  } else {
-    all_matches <- all_matches %>%
-      mutate(
-        fund_weight = 0,
-        in_portfolio = FALSE
-      )
-  }
+  message(sprintf("\n   ✅ HOLDINGS SUMMARY:"))
+  message(sprintf("      Total companies in universe: %d", nrow(holdings_lookup)))
+  message(sprintf("      Companies WITH holdings: %d", sum(holdings_lookup$in_portfolio)))
+  message(sprintf("      Companies WITHOUT holdings: %d", sum(!holdings_lookup$in_portfolio)))
+  message(sprintf("      Total portfolio value: $%s", format(total_portfolio, big.mark = ",")))
+  message(sprintf("\n   Matching methods:"))
+  message(sprintf("      ISIN matches: %d", sum(holdings_lookup$matched_by == "ISIN")))
+  message(sprintf("      Name matches: %d", sum(holdings_lookup$matched_by == "NAME")))
+  message(sprintf("      Unmatched: %d", sum(holdings_lookup$matched_by == "NONE")))
   
-  message(sprintf("   Total matched: %d companies", nrow(all_matches)))
-  message(sprintf("   Total portfolio value: $%s", 
-                  format(total_portfolio, big.mark = ",")))
-  
-  # Step 7: Create lookup table
-  holdings_lookup <- all_matches %>%
-    select(Ticker, total_net_exposure_usd, total_net_pct_ltp, 
-           n_funds, fund_weight, in_portfolio)
-  
+  # Return the lookup table
   return(holdings_lookup)
 }
 
-# Process holdings data
+# Process holdings data - ALL companies retained
 holdings_lookup <- process_holdings_data(
   holdings_path = "data/01_raw/current_holdings.rds",
   company_map_input = company_map
 )
 
-cat(sprintf("\n   ✅ Holdings processed: %d companies with positions\n", nrow(holdings_lookup)))
+cat(sprintf("\n   ✅ Holdings processed: %d companies total, %d with positions\n", 
+            nrow(holdings_lookup), 
+            sum(holdings_lookup$in_portfolio)))
 
 # =============================================================================
 # SECTION 3: CREATE MASTER TICKER LIST (ALL unique tickers)
@@ -603,63 +621,43 @@ cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("🏦 MERGING DUMAC HOLDINGS DATA\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Load holdings data from Integrated_Data file
-holdings_file <- file.path(raw_dir, "N200_FINAL_StrategicDUMACPortfolioDistribution_BBergUploadRawData_Integrated_Data.csv")
-
-if(file.exists(holdings_file)) {
-  cat("   Loading DUMAC holdings data...\n")
-  holdings_raw <- read.csv(holdings_file, stringsAsFactors = FALSE)
-  cat("   Holdings columns:", paste(names(holdings_raw)[1:5], collapse=", "), "...\n")
-  names(holdings_raw) <- gsub("\\.+", "_", names(holdings_raw))
+# Use holdings_lookup from Section 2 (NOT external CSV file)
+if(exists("holdings_lookup") && nrow(holdings_lookup) > 0) {
   
-  # Aggregate holdings by ticker
-  holdings_summary <- holdings_raw %>%
-    group_by(Ticker) %>%
-    summarise(
-      holdings_n_funds = n_distinct(fund_id, na.rm = TRUE),
-      holdings_total_weight = sum(as.numeric(fund_weight), na.rm = TRUE),
-      holdings_total_value = sum(as.numeric(position_value), na.rm = TRUE),
-      .groups = "drop"
-    )
+  cat("   Using holdings_lookup from Section 2 (Refinitiv data)\n")
+  cat(sprintf("   Holdings lookup contains %d companies\n", nrow(holdings_lookup)))
+  cat(sprintf("   Companies with holdings: %d\n", sum(holdings_lookup$in_portfolio)))
   
-  cat(sprintf("   Found %d unique companies with holdings data\n", nrow(holdings_summary)))
-  
-  # Perform the join with clear column names
-  daii_scored_merged <- daii_scored %>%
-    left_join(holdings_summary, by = c("ticker" = "Ticker"))
-  
-  # Add portfolio flags using the prefixed columns
-  daii_scored <- daii_scored_merged %>%
+  # Merge holdings_lookup with daii_scored
+  daii_scored <- daii_scored %>%
+    left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
     mutate(
-      in_portfolio = ifelse(!is.na(holdings_n_funds) & holdings_n_funds > 0, TRUE, FALSE),
-      n_funds = ifelse(!is.na(holdings_n_funds), holdings_n_funds, 0),
-      total_fund_weight = ifelse(!is.na(holdings_total_weight) & is.finite(holdings_total_weight), 
-                                 holdings_total_weight, 0),
-      total_position_value = ifelse(!is.na(holdings_total_value), holdings_total_value, 0)
+      # Use values from holdings_lookup, with defaults
+      in_portfolio = ifelse(is.na(in_portfolio), FALSE, in_portfolio),
+      n_funds = ifelse(is.na(n_funds), 0, n_funds),
+      fund_weight = ifelse(is.na(fund_weight), 0, fund_weight),
+      total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd), 0, total_net_exposure_usd),
+      total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp), 0, total_net_pct_ltp)
     )
   
   cat("\n📊 PORTFOLIO COVERAGE:\n")
   cat(sprintf("   Companies in portfolio: %d\n", sum(daii_scored$in_portfolio, na.rm = TRUE)))
   cat(sprintf("   Companies not in portfolio: %d\n", sum(!daii_scored$in_portfolio, na.rm = TRUE)))
+  cat(sprintf("   Total portfolio value: $%s\n", 
+              format(sum(daii_scored$total_net_exposure_usd[daii_scored$in_portfolio], na.rm = TRUE), 
+                     big.mark = ",")))
   
 } else {
-  cat("⚠️  Holdings file not found. Creating synthetic portfolio flags.\n")
+  cat("⚠️  holdings_lookup not found. Creating synthetic portfolio flags.\n")
   daii_scored <- daii_scored %>%
     mutate(
       in_portfolio = FALSE,
       n_funds = 0,
-      total_fund_weight = 0,
-      total_position_value = 0
+      fund_weight = 0,
+      total_net_exposure_usd = 0,
+      total_net_pct_ltp = 0
     )
 }
-
-# Check for tickers in holdings but not in fundamentals
-if(exists("holdings_summary") && exists("rd_history")) {
-  holdings_only <- setdiff(holdings_summary$Ticker, rd_history$ticker)
-  cat("\nTickers in holdings but not in fundamentals (likely ETFs/bonds):\n")
-  print(head(holdings_only, 20))
-}
-
 
 # Simple fix: create industry column with default value
 if(!"industry" %in% names(daii_scored)) {
