@@ -90,3 +90,4 @@ reporting:
     pass: 0.9  # 90% of checks must pass
     warning: 0.7  # 70-90% yields warning
     fail: 0.7  # Below 70% fails
+

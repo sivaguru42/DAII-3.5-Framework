@@ -54,3 +54,4 @@ performance:
   num_cores: 4
   memory_limit_gb: 8
   chunk_size: 500
+

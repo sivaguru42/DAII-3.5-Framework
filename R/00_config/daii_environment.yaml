@@ -34,3 +34,4 @@ variables:
   # Memory limits
   R_MAX_VSIZE: "8Gb"
   R_MAX_NUM_DLLS: 150
+

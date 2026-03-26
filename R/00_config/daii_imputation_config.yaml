@@ -16,3 +16,4 @@ news_volume:
 revenue_growth:
   method: industry_median
   fallback: global_median
+

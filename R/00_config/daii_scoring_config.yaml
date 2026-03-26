@@ -18,3 +18,4 @@ growth_intensity:
   weight: 0.1
   normalization: min_max
   direction: positive
+

@@ -56,3 +56,4 @@ queries:
       percent_of_fund
     FROM portfolio_holdings
     WHERE as_of_date = :as_of_date
+
