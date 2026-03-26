@@ -1697,9 +1697,11 @@ performance_data <- data.frame(
 )
 writeData(wb, "Performance", performance_data)
 
-# Sheet 11: Metadata (Methodology & Definitions)
+# Sheet 11: Metadata (Methodology & Definitions) - UPDATED with Imputation Info
 addWorksheet(wb, "Metadata")
-metadata <- data.frame(
+
+# Base metadata
+metadata_base <- data.frame(
   Field = c(
     "Pipeline Version", "Run Timestamp", "Data Sources",
     "AI Score Definition", "Aggressive AI Score Definition",
@@ -1716,8 +1718,59 @@ metadata <- data.frame(
     "Isolation Forest (100 trees, top 10% threshold)",
     "R&D Intensity, Patent Activity, Revenue Growth, Inverse Volatility",
     "DAII Pipeline Team - sganesan@dumac.duke.edu"
-  )
+  ),
+  stringsAsFactors = FALSE
 )
+
+# Imputation metadata (only if imputed data exists)
+if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+  
+  # Get list of imputed companies
+  imputed_companies <- portfolio_holdings %>%
+    filter(score_imputed == TRUE) %>%
+    arrange(ticker) %>%
+    pull(ticker)
+  
+  imputed_companies_list <- paste(imputed_companies, collapse = ", ")
+  
+  # Create imputation methodology text
+  imputation_method <- paste(
+    "For companies missing AI/innovation scores, the following imputation methodology was applied:",
+    "1. Innovation Score: Estimated using patent activity (log-normalized) with baseline of 0.3",
+    "2. AI Score: Estimated using patent activity or revenue growth, with baseline of 0.25",
+    "3. AI Label: Assigned based on imputed AI score thresholds",
+    "4. Growth & Volatility: Default values (0% growth, 0.5 volatility) where missing",
+    "",
+    "Companies with imputed scores are flagged in the data for transparency.",
+    "These estimates should be considered directional and validated with fundamental research.",
+    sep = "\n"
+  )
+  
+  metadata_imputation <- data.frame(
+    Field = c(
+      "⚠️ AI Score Imputation Note",
+      "Imputed Companies Count",
+      "Imputed Companies List",
+      "Imputation Methodology",
+      "Imputation Date"
+    ),
+    Value = c(
+      "IMPORTANT: AI scores for some companies were estimated due to missing data",
+      as.character(sum(portfolio_holdings$score_imputed, na.rm = TRUE)),
+      imputed_companies_list,
+      imputation_method,
+      as.character(Sys.Date())
+    ),
+    stringsAsFactors = FALSE
+  )
+  
+  # Combine base and imputation metadata
+  metadata <- bind_rows(metadata_base, metadata_imputation)
+  
+} else {
+  metadata <- metadata_base
+}
+
 writeData(wb, "Metadata", metadata)
 
 # ============================================================================
