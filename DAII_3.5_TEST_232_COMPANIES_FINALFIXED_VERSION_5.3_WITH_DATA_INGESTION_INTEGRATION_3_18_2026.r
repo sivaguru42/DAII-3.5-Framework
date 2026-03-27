@@ -663,6 +663,7 @@ if(!"industry" %in% names(daii_scored)) {
   cat("   Created industry column with default 'Unknown'\n")
 }
 
+# =============================================================================
 # SECTION 9: AI INTENSITY SCORING & PORTFOLIO CONSTRUCTION
 # =============================================================================
 cat(paste(rep("=", 80), collapse = ""), "\n")
@@ -695,7 +696,7 @@ industry_multipliers <- data.frame(
 daii_scored <- daii_scored %>%
   left_join(industry_multipliers, by = "industry") %>%
   mutate(
-    multiplier = ifelse(is.na(multiplier), 1.0, multiplier),
+    multiplier = ifelse(is.na(multiplier.y), 1.0, multiplier.y),
     ai_score = innovation_score * multiplier,
     ai_quartile = ntile(ai_score, 4),
     ai_label = case_when(
@@ -704,7 +705,8 @@ daii_scored <- daii_scored %>%
       ai_quartile == 2 ~ "AI Follower",
       TRUE ~ "AI Laggard"
     )
-  )
+  ) %>%
+  select(-multiplier.x, -multiplier.y)  # Remove temporary multiplier columns
 
 cat("\n🤖 AI Score Distribution:\n")
 print(table(daii_scored$ai_label))
@@ -712,32 +714,36 @@ print(table(daii_scored$ai_label))
 # Construct DUMAC Portfolios
 cat("\n💼 Building DUMAC Portfolios...\n")
 
+# Use fund_weight from holdings (already in daii_scored)
 portfolio_vol_median <- median(daii_scored$volatility[daii_scored$in_portfolio], na.rm = TRUE)
+
+# Get total fund weight for portfolio companies
+total_portfolio_weight <- sum(daii_scored$fund_weight[daii_scored$in_portfolio], na.rm = TRUE)
 
 dumac_portfolios <- daii_scored %>%
   filter(in_portfolio == TRUE) %>%
   mutate(
     quality_innovators_weight = ifelse(
       innovation_quartile == 4 & volatility < portfolio_vol_median,
-      total_fund_weight / sum(total_fund_weight[innovation_quartile == 4 & volatility < portfolio_vol_median]),
+      fund_weight / total_portfolio_weight,
       0
     ),
     ai_concentrated_weight = ifelse(
       ai_quartile == 4,
-      total_fund_weight / sum(total_fund_weight[ai_quartile == 4]),
+      fund_weight / total_portfolio_weight,
       0
     ),
     balanced_growth_weight = ifelse(
       innovation_quartile >= 3 & ai_quartile >= 3,
-      total_fund_weight / sum(total_fund_weight[innovation_quartile >= 3 & ai_quartile >= 3]),
+      fund_weight / total_portfolio_weight,
       0
     )
   )
 
 cat(sprintf("   DUMAC Portfolio Companies: %d\n", nrow(dumac_portfolios)))
-cat(sprintf("   Quality Innovators: %d\n", sum(dumac_portfolios$quality_innovators_weight > 0)))
-cat(sprintf("   AI Concentrated: %d\n", sum(dumac_portfolios$ai_concentrated_weight > 0)))
-cat(sprintf("   Balanced Growth: %d\n", sum(dumac_portfolios$balanced_growth_weight > 0)))
+cat(sprintf("   Quality Innovators: %d\n", sum(dumac_portfolios$quality_innovators_weight > 0, na.rm = TRUE)))
+cat(sprintf("   AI Concentrated: %d\n", sum(dumac_portfolios$ai_concentrated_weight > 0, na.rm = TRUE)))
+cat(sprintf("   Balanced Growth: %d\n", sum(dumac_portfolios$balanced_growth_weight > 0, na.rm = TRUE)))
 
 # Construct Discovery Portfolios
 cat("\n🔍 Building Discovery Portfolios...\n")
@@ -745,17 +751,17 @@ cat("\n🔍 Building Discovery Portfolios...\n")
 discovery_portfolios <- daii_scored %>%
   filter(in_portfolio == FALSE) %>%
   mutate(
-    innovation_rank = rank(-innovation_score),
-    ai_rank = rank(-ai_score),
-    combined_rank = rank(-(innovation_score + ai_score)),
+    innovation_rank = rank(-innovation_score, ties.method = "first"),
+    ai_rank = rank(-ai_score, ties.method = "first"),
+    combined_rank = rank(-(innovation_score + ai_score), ties.method = "first"),
     discovery_quality_weight = ifelse(
-      innovation_quartile == 4 & volatility < median(volatility),
-      innovation_score / sum(innovation_score[innovation_quartile == 4 & volatility < median(volatility)]),
+      innovation_quartile == 4 & volatility < median(volatility, na.rm = TRUE),
+      innovation_score / sum(innovation_score[innovation_quartile == 4 & volatility < median(volatility, na.rm = TRUE)], na.rm = TRUE),
       0
     ),
     discovery_ai_weight = ifelse(
       ai_quartile == 4,
-      ai_score / sum(ai_score[ai_quartile == 4]),
+      ai_score / sum(ai_score[ai_quartile == 4], na.rm = TRUE),
       0
     ),
     discovery_tier = case_when(
@@ -775,7 +781,7 @@ daii_scored <- daii_scored %>%
   left_join(dumac_portfolios[, c("ticker", "quality_innovators_weight", "ai_concentrated_weight", 
                                  "balanced_growth_weight")], by = "ticker") %>%
   left_join(discovery_portfolios[, c("ticker", "discovery_quality_weight", "discovery_ai_weight", 
-                                    "discovery_tier", "innovation_rank", "ai_rank", "combined_rank")], 
+                                     "discovery_tier", "innovation_rank", "ai_rank", "combined_rank")], 
             by = "ticker") %>%
   mutate(across(ends_with("_weight"), ~ifelse(is.na(.), 0, .)))
 
