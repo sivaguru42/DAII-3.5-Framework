@@ -620,9 +620,13 @@ if(exists("holdings_lookup") && nrow(holdings_lookup) > 0) {
   cat(sprintf("   Holdings lookup contains %d companies\n", nrow(holdings_lookup)))
   cat(sprintf("   Companies with holdings: %d\n", sum(holdings_lookup$in_portfolio)))
   
+  # First, rename the Ticker column in holdings_lookup to match daii_scored
+  holdings_lookup_clean <- holdings_lookup %>%
+    rename(ticker = Ticker)
+  
   # Merge holdings_lookup with daii_scored
   daii_scored <- daii_scored %>%
-    left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+    left_join(holdings_lookup_clean, by = "ticker") %>%
     mutate(
       # Use values from holdings_lookup, with defaults
       in_portfolio = ifelse(is.na(in_portfolio), FALSE, in_portfolio),
