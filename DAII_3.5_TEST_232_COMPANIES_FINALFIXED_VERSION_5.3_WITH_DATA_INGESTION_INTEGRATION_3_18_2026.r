@@ -754,7 +754,7 @@ if(!"industry" %in% names(daii_scored)) {
 }
 
 # =============================================================================
-# SECTION 9: AI INTENSITY SCORING & PORTFOLIO CONSTRUCTION
+# SECTION 9: AI INTENSITY SCORING & PORTFOLIO CONSTRUCTION (FIXED)
 # =============================================================================
 cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("🤖 SECTION 9: AI INTENSITY SCORING & PORTFOLIO CONSTRUCTION\n")
@@ -786,7 +786,7 @@ industry_multipliers <- data.frame(
 daii_scored <- daii_scored %>%
   left_join(industry_multipliers, by = "industry") %>%
   mutate(
-    multiplier = ifelse(is.na(multiplier.y), 1.0, multiplier.y),
+    multiplier = ifelse(is.na(multiplier), 1.0, multiplier),
     ai_score = innovation_score * multiplier,
     ai_quartile = ntile(ai_score, 4),
     ai_label = case_when(
@@ -795,8 +795,7 @@ daii_scored <- daii_scored %>%
       ai_quartile == 2 ~ "AI Follower",
       TRUE ~ "AI Laggard"
     )
-  ) %>%
-  select(-multiplier.x, -multiplier.y)  # Remove temporary multiplier columns
+  )
 
 cat("\n🤖 AI Score Distribution:\n")
 print(table(daii_scored$ai_label))
@@ -874,7 +873,6 @@ daii_scored <- daii_scored %>%
                                      "discovery_tier", "innovation_rank", "ai_rank", "combined_rank")], 
             by = "ticker") %>%
   mutate(across(ends_with("_weight"), ~ifelse(is.na(.), 0, .)))
-
 # =============================================================================
 # SECTION 10: AI CUBE & ANOMALY DETECTION
 # =============================================================================
