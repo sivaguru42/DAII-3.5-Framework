@@ -616,25 +616,27 @@ cat(paste(rep("=", 80), collapse = ""), "\n\n")
 # Use holdings_lookup from Section 2
 if(exists("holdings_lookup") && nrow(holdings_lookup) > 0) {
   
-  cat("   Using holdings_lookup from Section 2\n")
-  cat(sprintf("   Holdings lookup contains %d companies\n", nrow(holdings_lookup)))
-  cat(sprintf("   Companies with holdings: %d\n", sum(holdings_lookup$in_portfolio)))
-  
-  # First, rename the Ticker column in holdings_lookup to match daii_scored
+  # Rename Ticker to ticker for joining
   holdings_lookup_clean <- holdings_lookup %>%
     rename(ticker = Ticker)
+  
+  cat("   Using holdings_lookup from Section 2\n")
+  cat(sprintf("   Holdings lookup contains %d companies\n", nrow(holdings_lookup_clean)))
+  cat(sprintf("   Companies with holdings: %d\n", sum(holdings_lookup_clean$in_portfolio)))
   
   # Merge holdings_lookup with daii_scored
   daii_scored <- daii_scored %>%
     left_join(holdings_lookup_clean, by = "ticker") %>%
     mutate(
-      # Use values from holdings_lookup, with defaults
-      in_portfolio = ifelse(is.na(in_portfolio), FALSE, in_portfolio),
-      n_funds = ifelse(is.na(n_funds), 0, n_funds),
-      fund_weight = ifelse(is.na(fund_weight), 0, fund_weight),
-      total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd), 0, total_net_exposure_usd),
-      total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp), 0, total_net_pct_ltp)
-    )
+      # Use the .y versions (from holdings_lookup_clean)
+      in_portfolio = ifelse(is.na(in_portfolio.y), FALSE, in_portfolio.y),
+      n_funds = ifelse(is.na(n_funds.y), 0, n_funds.y),
+      fund_weight = ifelse(is.na(fund_weight.y), 0, fund_weight.y),
+      total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd.y), 0, total_net_exposure_usd.y),
+      total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp.y), 0, total_net_pct_ltp.y)
+    ) %>%
+    # Drop the .x and .y columns to keep things clean
+    select(-ends_with(".x"), -ends_with(".y"))
   
   cat("\n📊 PORTFOLIO COVERAGE:\n")
   cat(sprintf("   Companies in portfolio: %d\n", sum(daii_scored$in_portfolio, na.rm = TRUE)))
