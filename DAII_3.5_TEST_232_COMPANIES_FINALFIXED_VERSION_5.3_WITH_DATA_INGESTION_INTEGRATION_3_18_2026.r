@@ -350,15 +350,15 @@ cat("\n✅ Live snapshot saved to:", snapshot_file, "\n")
 daii_raw_data <- master_snapshot
 
 # =============================================================================
-# SECTION 2: LOAD HOLDINGS DATA (FIXED VERSION - ALL COMPANIES RETAINED)
+# SECTION 2: LOAD HOLDINGS DATA (FIXED - INCLUDES ALL ISINs)
 # =============================================================================
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("🏦 SECTION 2: LOADING DUMAC HOLDINGS DATA\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Function to process holdings with fixed merge logic - RETAINS ALL COMPANIES
-process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.rds",
-                                  company_map_input = NULL) {
+# Function to process holdings - INCLUDES ALL SECURITIES WITH ISINs
+process_holdings_data_fixed <- function(holdings_path = "data/01_raw/current_holdings.rds",
+                                        company_map_input = NULL) {
   
   message("   Processing DUMAC holdings data...")
   
@@ -368,30 +368,22 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   
   message(sprintf("   Raw holdings: %d securities", nrow(holdings_aggregated)))
   
-  # Step 1: Clean and filter for stock holdings
-  holdings_clean <- holdings_aggregated %>%
+  # Step 1: Keep ALL securities with ISINs (don't filter by name patterns)
+  # This ensures Korean/Japanese companies with KR/JP ISINs are included
+  holdings_all_isins <- holdings_aggregated %>%
+    filter(!is.na(ISIN)) %>%
     mutate(
-      # Flag for common stock holdings (exclude derivatives)
-      is_stock = !grepl("CFD|Future|ETF|Index|Bond|Treasury|Swap|Forward", 
-                        security_name, ignore.case = TRUE) &
-        grepl("Inc\\.|Ltd\\.|Corp\\.|Class|Shares|Common|Equity", 
-              security_name, ignore.case = TRUE) &
-        !is.na(ISIN),
-      
-      # Clean company name for matching
       clean_name = gsub(" - CLASS.*$| INC\\.?$| LTD\\.?$| CORP\\.?$| CO\\.?$", 
                         "", security_name),
       clean_name = trimws(clean_name),
       clean_name = toupper(clean_name)
-    ) %>%
-    filter(is_stock)
+    )
   
-  message(sprintf("   Stock holdings: %d securities (%.1f%%)", 
-                  nrow(holdings_clean),
-                  ifelse(nrow(holdings_aggregated) > 0, 
-                         nrow(holdings_clean) / nrow(holdings_aggregated) * 100, 0)))
+  message(sprintf("   Securities with ISINs: %d (%.1f%%)", 
+                  nrow(holdings_all_isins),
+                  nrow(holdings_all_isins) / nrow(holdings_aggregated) * 100))
   
-  # Step 2: Prepare company map for matching (CREATE lookup_name HERE)
+  # Step 2: Prepare company map for matching
   company_lookup <- company_map_input %>%
     mutate(
       lookup_name = toupper(gsub(" Inc$| Corp$| Ltd$| LLC$| PLC$| Co$| Company$", 
@@ -401,9 +393,9 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   
   message(sprintf("   Company universe: %d companies", nrow(company_lookup)))
   
-  # Step 3: Match by ISIN (primary method) - use LEFT JOIN to keep ALL companies
+  # Step 3: Match by ISIN (primary method) - ALL ISINs included
   matches_isin <- company_lookup %>%
-    left_join(holdings_clean, by = "ISIN", relationship = "many-to-many") %>%
+    left_join(holdings_all_isins, by = "ISIN", relationship = "many-to-many") %>%
     group_by(Ticker) %>%
     summarise(
       total_net_exposure_usd = sum(total_net_exposure_usd, na.rm = TRUE),
@@ -413,12 +405,12 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
       .groups = "drop"
     )
   
-  message(sprintf("   ISIN matches: %d companies", sum(matches_isin$total_net_exposure_usd > 0, na.rm = TRUE)))
+  isin_match_count <- sum(matches_isin$total_net_exposure_usd > 0, na.rm = TRUE)
+  message(sprintf("   ISIN matches: %d companies", isin_match_count))
   
-  # Step 4: Match remaining by company name (for those not matched by ISIN)
-  if(nrow(company_lookup) > 0 && nrow(holdings_clean) > 0) {
+  # Step 4: Match remaining by company name
+  if(nrow(company_lookup) > 0 && nrow(holdings_all_isins) > 0) {
     
-    # Identify companies not yet matched
     companies_without_isin_match <- matches_isin %>%
       filter(total_net_exposure_usd == 0 | is.na(total_net_exposure_usd)) %>%
       pull(Ticker)
@@ -426,12 +418,11 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
     unmatched_companies <- company_lookup %>%
       filter(Ticker %in% companies_without_isin_match)
     
-    # Filter holdings that weren't matched by ISIN
     matched_isin_tickers <- company_lookup %>%
       filter(Ticker %in% matches_isin$Ticker[matches_isin$total_net_exposure_usd > 0]) %>%
       pull(ISIN)
     
-    holdings_for_name_match <- holdings_clean %>%
+    holdings_for_name_match <- holdings_all_isins %>%
       filter(!ISIN %in% matched_isin_tickers)
     
     matches_name <- holdings_for_name_match %>%
@@ -448,12 +439,16 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
     
     message(sprintf("   Name matches: %d companies", nrow(matches_name)))
     
-    # Merge name matches into matches_isin
+    # Merge name matches
     matches_isin <- matches_isin %>%
       left_join(matches_name, by = "Ticker", suffix = c("", "_name")) %>%
       mutate(
-        total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd_name), total_net_exposure_usd, total_net_exposure_usd_name),
-        total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp_name), total_net_pct_ltp, total_net_pct_ltp_name),
+        total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd_name), 
+                                        total_net_exposure_usd, 
+                                        total_net_exposure_usd_name),
+        total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp_name), 
+                                   total_net_pct_ltp, 
+                                   total_net_pct_ltp_name),
         n_funds = ifelse(is.na(n_funds_name), n_funds, n_funds_name),
         matched_by = ifelse(is.na(matched_by_name), matched_by, "NAME")
       ) %>%
@@ -463,17 +458,15 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
     message("   Name matches: 0 companies")
   }
   
-  # Step 5: Calculate portfolio weights (based ONLY on companies with holdings)
+  # Step 5: Calculate portfolio weights
   total_portfolio <- sum(matches_isin$total_net_exposure_usd, na.rm = TRUE)
   
   holdings_lookup <- matches_isin %>%
     mutate(
-      # Replace NA with 0
       total_net_exposure_usd = ifelse(is.na(total_net_exposure_usd), 0, total_net_exposure_usd),
       total_net_pct_ltp = ifelse(is.na(total_net_pct_ltp), 0, total_net_pct_ltp),
       n_funds = ifelse(is.na(n_funds), 0, n_funds),
       matched_by = ifelse(is.na(matched_by), "NONE", matched_by),
-      # Portfolio flag and weight
       in_portfolio = total_net_exposure_usd != 0,
       fund_weight = ifelse(in_portfolio, total_net_exposure_usd / total_portfolio, 0)
     )
@@ -488,12 +481,11 @@ process_holdings_data <- function(holdings_path = "data/01_raw/current_holdings.
   message(sprintf("      Name matches: %d", sum(holdings_lookup$matched_by == "NAME")))
   message(sprintf("      Unmatched: %d", sum(holdings_lookup$matched_by == "NONE")))
   
-  # Return the lookup table
   return(holdings_lookup)
 }
 
-# Process holdings data - ALL companies retained
-holdings_lookup <- process_holdings_data(
+# Process holdings data with the fixed function
+holdings_lookup <- process_holdings_data_fixed(
   holdings_path = "data/01_raw/current_holdings.rds",
   company_map_input = company_map
 )
@@ -621,10 +613,10 @@ cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("🏦 MERGING DUMAC HOLDINGS DATA\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Use holdings_lookup from Section 2 (NOT external CSV file)
+# Use holdings_lookup from Section 2
 if(exists("holdings_lookup") && nrow(holdings_lookup) > 0) {
   
-  cat("   Using holdings_lookup from Section 2 (Refinitiv data)\n")
+  cat("   Using holdings_lookup from Section 2\n")
   cat(sprintf("   Holdings lookup contains %d companies\n", nrow(holdings_lookup)))
   cat(sprintf("   Companies with holdings: %d\n", sum(holdings_lookup$in_portfolio)))
   
