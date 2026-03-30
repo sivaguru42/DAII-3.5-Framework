@@ -61,7 +61,7 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 }
 
 # ============================================================================
-# PART 2: MATCHED-PAIR CONTROLS (SIMPLIFIED ROBUST VERSION)
+# PART 2: MATCHED-PAIR CONTROLS (FINAL ROBUST VERSION)
 # ============================================================================
 
 construct_matched_controls <- function(portfolio_companies, 
@@ -100,17 +100,26 @@ construct_matched_controls <- function(portfolio_companies,
     return(list(pairs = data.frame(), quality = data.frame()))
   }
   
+  # Pre-calculate standard deviations for distance normalization
+  mcap_sd <- sd(log(eligible_controls$market_cap), na.rm = TRUE) + 0.01
+  growth_sd <- sd(eligible_controls$revenue_growth, na.rm = TRUE) + 0.01
+  
   matches <- data.frame()
+  skipped_count <- 0
   
   for(i in 1:nrow(portfolio_companies)) {
     
     portfolio_data <- portfolio_companies[i, ]
     
-    # Skip if portfolio company has missing market cap or revenue growth
-    if(is.na(portfolio_data$market_cap) || portfolio_data$market_cap <= 0) {
-      next
-    }
-    if(is.na(portfolio_data$revenue_growth)) {
+    # Safe check for NA values - use tryCatch to handle any issues
+    safe_to_process <- tryCatch({
+      mcap_ok <- !is.na(portfolio_data$market_cap) && portfolio_data$market_cap > 0
+      growth_ok <- !is.na(portfolio_data$revenue_growth)
+      mcap_ok && growth_ok
+    }, error = function(e) FALSE)
+    
+    if(!safe_to_process) {
+      skipped_count <- skipped_count + 1
       next
     }
     
@@ -120,10 +129,8 @@ construct_matched_controls <- function(portfolio_companies,
     # Calculate distance scores for this portfolio company
     controls <- controls %>%
       mutate(
-        size_distance = abs(log(market_cap) - log(portfolio_data$market_cap)) / 
-          (sd(log(eligible_controls$market_cap), na.rm = TRUE) + 0.01),
-        growth_distance = abs(revenue_growth - portfolio_data$revenue_growth) / 
-          (sd(eligible_controls$revenue_growth, na.rm = TRUE) + 0.01),
+        size_distance = abs(log(market_cap) - log(portfolio_data$market_cap)) / mcap_sd,
+        growth_distance = abs(revenue_growth - portfolio_data$revenue_growth) / growth_sd,
         total_distance = size_distance + growth_distance
       )
     
@@ -162,6 +169,10 @@ construct_matched_controls <- function(portfolio_companies,
         stringsAsFactors = FALSE
       ))
     }
+  }
+  
+  if(skipped_count > 0) {
+    message(sprintf("      Skipped %d portfolio companies due to missing data", skipped_count))
   }
   
   # Calculate match quality metrics
