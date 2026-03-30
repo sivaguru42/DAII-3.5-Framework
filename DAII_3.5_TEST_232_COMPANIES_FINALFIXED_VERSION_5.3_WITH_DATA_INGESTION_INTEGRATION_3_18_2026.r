@@ -175,7 +175,7 @@ source(here("R", "02_ingest", "04_pull_daily_ratios.r"))
 source(here("R", "02_ingest", "05_patentsview.r"))
 source(here("R", "02_ingest", "06_pull_bloomberg_api.r"))      # One-time pull (rarely used)
 source(here("R", "02_ingest", "07_load_bloomberg_cache.r"))    # Every pipeline run
-source(here("R", "02_ingest", "08_ingest_bloomberg_api.r"))    # Future production
+#source(here("R", "02_ingest", "08_ingest_bloomberg_api.r"))    # Future production
 source(here("R", "02_ingest", "09_pull_msci.r"))               # Optional
 
 # Transform scripts
@@ -1282,7 +1282,7 @@ cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("📊 SECTION 10.8: BENCHMARK ANALYSIS\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-# Source the control benchmarks module (use the correct filename)
+# Source the control benchmarks module
 module_file <- "R/04_modules/08_control_benchmarks.r"
 
 if(file.exists(module_file)) {
@@ -1292,7 +1292,12 @@ if(file.exists(module_file)) {
   # Check if we have the required data
   if(exists("daii_scored") && exists("portfolio_holdings")) {
     
-    # Test 1: AI-Low Benchmark
+    cat(sprintf("   daii_scored: %d rows\n", nrow(daii_scored)))
+    cat(sprintf("   portfolio_holdings: %d rows\n", nrow(portfolio_holdings)))
+    
+    # ========================================================================
+    # TEST 1: AI-Low Benchmark
+    # ========================================================================
     cat("\n🤖 Creating AI-Low benchmark...\n")
     ai_low_benchmark <- construct_ai_low_benchmark(
       daii_scored = daii_scored,
@@ -1301,10 +1306,20 @@ if(file.exists(module_file)) {
     )
     cat(sprintf("   AI-Low benchmark: %d companies\n", nrow(ai_low_benchmark)))
     
-    # Test 2: Matched-Pair Controls (using first 50 portfolio companies for speed)
+    # Display top 10 AI-Low benchmark holdings
+    cat("\n   Top 10 AI-Low benchmark holdings:\n")
+    ai_low_benchmark %>%
+      arrange(desc(weight)) %>%
+      head(10) %>%
+      select(ticker, company_name, weight, ai_score) %>%
+      print()
+    
+    # ========================================================================
+    # TEST 2: Matched-Pair Controls
+    # ========================================================================
     cat("\n🔗 Creating matched-pair controls...\n")
     matched_controls <- construct_matched_controls(
-      portfolio_companies = portfolio_holdings %>% head(50),
+      portfolio_companies = portfolio_holdings,
       universe = daii_scored,
       match_vars = c("TRBC_Industry", "market_cap", "revenue_growth"),
       k = 1,
@@ -1312,25 +1327,98 @@ if(file.exists(module_file)) {
     )
     
     if(nrow(matched_controls$pairs) > 0) {
-      cat(sprintf("   Matched pairs: %d\n", nrow(matched_controls$pairs)))
+      cat(sprintf("\n   ✅ Matched pairs created: %d\n", nrow(matched_controls$pairs)))
+      cat(sprintf("   Unique portfolio companies matched: %d\n", 
+                  matched_controls$quality$unique_portfolio_companies))
       cat(sprintf("   Average AI gap: %.3f\n", matched_controls$quality$avg_ai_gap))
-      cat(sprintf("   Good matches: %.1f%%\n", matched_controls$quality$pct_good_matches))
+      cat(sprintf("   Good matches (distance < 1): %.1f%%\n", 
+                  matched_controls$quality$pct_good_matches))
+      
+      # Display sample matched pairs
+      cat("\n   Sample matched pairs (first 10):\n")
+      matched_controls$pairs %>%
+        head(10) %>%
+        select(portfolio_ticker, control_ticker, ai_score_gap, distance) %>%
+        print()
     } else {
-      cat("   No matches found\n")
+      cat("   ⚠️ No matches found\n")
     }
     
+    # ========================================================================
+    # TEST 3: Prepare Donor Pool for Synthetic Control
+    # ========================================================================
+    cat("\n🧠 Preparing donor pool for synthetic control...\n")
+    donor_pool <- prepare_donor_pool(
+      daii_scored = daii_scored,
+      exclude_tickers = portfolio_holdings$ticker,
+      ai_threshold = 0.3
+    )
+    cat(sprintf("   Donor pool: %d companies\n", length(donor_pool)))
+    
+    # ========================================================================
+    # TEST 4: Synthetic Control (if we have daily returns)
+    # ========================================================================
+    if(exists("daily_ratios") && nrow(daily_ratios) > 0 && length(donor_pool) >= 5) {
+      
+      cat("\n🧪 Running synthetic control analysis...\n")
+      
+      # Calculate portfolio daily returns
+      portfolio_daily <- daily_ratios %>%
+        filter(Ticker %in% portfolio_holdings$ticker) %>%
+        left_join(portfolio_holdings %>% select(ticker, fund_weight), 
+                  by = c("Ticker" = "ticker")) %>%
+        mutate(weighted_return = price_1d_pct_change * fund_weight) %>%
+        group_by(as_of_date) %>%
+        summarise(portfolio_return = sum(weighted_return, na.rm = TRUE)) %>%
+        ungroup() %>%
+        rename(date = as_of_date) %>%
+        arrange(date)
+      
+      # Get donor returns
+      donor_returns <- daily_ratios %>%
+        filter(Ticker %in% donor_pool) %>%
+        select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change)
+      
+      if(nrow(portfolio_daily) > 60 && nrow(donor_returns) > 0) {
+        synthetic_result <- calculate_synthetic_alpha(
+          portfolio_returns = portfolio_daily,
+          donor_returns = donor_returns,
+          method = "ridge",
+          train_ratio = 0.7
+        )
+        
+        if(!is.null(synthetic_result)) {
+          cat("\n   ✅ Synthetic Control Results:\n")
+          cat(sprintf("      Active donors: %d\n", synthetic_result$active_donors))
+          cat(sprintf("      Alpha (annualized): %.2f%%\n", synthetic_result$alpha_annualized * 100))
+          cat(sprintf("      Win rate: %.1f%%\n", synthetic_result$win_rate))
+          cat(sprintf("      Information Ratio: %.2f\n", synthetic_result$information_ratio))
+          
+          # Store for later
+          assign("synthetic_control_result", synthetic_result, envir = .GlobalEnv)
+        }
+      } else {
+        cat("   ⚠️ Insufficient data for synthetic control\n")
+      }
+    } else {
+      cat("\n   ⚠️ Skipping synthetic control (insufficient donors or returns data)\n")
+    }
+    
+    # ========================================================================
     # Store results for Section 11
+    # ========================================================================
     assign("ai_low_benchmark", ai_low_benchmark, envir = .GlobalEnv)
     assign("matched_controls", matched_controls, envir = .GlobalEnv)
+    assign("donor_pool", donor_pool, envir = .GlobalEnv)
     
   } else {
-    cat("   ⚠️ Missing daii_scored or portfolio_holdings\n")
+    cat("   ⚠️ Missing required data for benchmark analysis\n")
+    if(!exists("daii_scored")) cat("      - daii_scored not found\n")
+    if(!exists("portfolio_holdings")) cat("      - portfolio_holdings not found\n")
   }
   
 } else {
-  cat(sprintf("   ⚠️ Module not found: %s\n", module_file))
-  cat("   Available modules:\n")
-  print(list.files("R/04_modules/", pattern = "\\.r$"))
+  cat(sprintf("   ❌ Module not found: %s\n", module_file))
 }
 
 cat("\n   ✅ Benchmark analysis complete\n")
