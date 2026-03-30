@@ -1,15 +1,18 @@
 library(dplyr)
 source(here::here("R", "01_utils", "database_connection.r"))
 
-pull_daily_ratios <- function(company_map, start_date = "2024-01-01") {
+pull_daily_ratios <- function(company_map, start_date = "2024-01-01", 
+                              include_benchmarks = TRUE) {
   
   message("Pulling daily ratios...")
   
   conn <- connect_research()
   on.exit(dbDisconnect(conn), add = TRUE)
   
+  # Get company RepNos
   repno_list <- paste0("'", paste(company_map$RepNo, collapse = "', '"), "'")
   
+  # Base SQL for companies
   sql <- sprintf("
     SELECT
         [RepNo],
@@ -47,7 +50,7 @@ pull_daily_ratios <- function(company_map, start_date = "2024-01-01") {
     ORDER BY [RepNo], [as_of_date] DESC
   ", repno_list, start_date)
   
-  message("  Querying refinitiv.daily_ratios_and_values...")
+  message("  Querying refinitiv.daily_ratios_and_values for companies...")
   
   ratios <- tryCatch({
     dbGetQuery(conn, sql)
@@ -55,10 +58,90 @@ pull_daily_ratios <- function(company_map, start_date = "2024-01-01") {
     stop("Query failed: ", e$message)
   })
   
-  message(sprintf("  Pulled %d daily ratio records", nrow(ratios)))
+  message(sprintf("  Pulled %d daily ratio records for companies", nrow(ratios)))
   
-  # Join with ticker
-  ratios <- left_join(ratios, company_map[, c("RepNo", "Ticker")], by = "RepNo")
+  # Add benchmark data if requested
+  if(include_benchmarks) {
+    message("  Adding benchmark indices...")
+    
+    # Benchmark tickers to include
+    benchmark_tickers <- c(".SPX", ".IXIC", ".MID", ".SPCY", ".RUT")
+    benchmark_names <- c("S&P 500", "NASDAQ 100", "S&P 400 Mid Cap", "S&P 600 Small Cap", "Russell 2000")
+    
+    # Create a temporary mapping for benchmarks
+    benchmark_map <- data.frame(
+      Ticker = benchmark_tickers,
+      CompanyName = benchmark_names,
+      stringsAsFactors = FALSE
+    )
+    
+    # For benchmarks, we need to query by ticker directly
+    # Note: Benchmarks may not have RepNos, so we use a different approach
+    
+    # Build ticker list for SQL IN clause
+    ticker_list <- paste0("'", benchmark_tickers, "'", collapse = ", ")
+    
+    benchmark_sql <- sprintf("
+      SELECT
+          NULL AS RepNo,
+          [as_of_date],
+          [Market_capitalization]                                                AS market_cap,
+          [P_÷_E_excluding_extraordinary_items_most_recent_fiscal_yearr]        AS pe_ratio_fy,
+          [P_÷_E_excluding_extraordinary_items_TTM]                             AS pe_ratio_ttm,
+          [Price_to_Book_most_recent_fiscal_yearr]                              AS pb_ratio,
+          [Current_EV_÷_EBITDA]                                                 AS ev_ebitda,
+          [Current_EV_÷_Revenue]                                                AS ev_revenue,
+          [Beta_]                                                               AS beta_5y,
+          [3_Year_Weekly_Beta]                                                  AS beta_3y,
+          [Price_closing_or_last_bid]                                           AS close_price,
+          [Volume_avg._trading_volume_for_the_last_ten_days]                    AS avg_volume_10d,
+          [Dividend_Yield_indicated_annual_dividend_divided_by_closing_price]    AS div_yield,
+          [Return_on_average_equity_trailing_12_month]                          AS roe_ttm,
+          [Net_Profit_Margin_%%_trailing_12_month]                              AS net_margin_ttm,
+          [Revenue_trailing_12_month]                                           AS revenue_ttm,
+          [Free_Cash_Flow_trailing_12_month]                                    AS fcf_ttm,
+          [EPS_excluding_extraordinary_items_trailing_12_month]                 AS eps_ttm,
+          [Total_debt_most_recent_quarter]                                      AS total_debt,
+          [Cash_and_Equiv._most_recent_quarter]                                 AS cash_equiv,
+          [Price_52_week_price_percent_change]                                  AS price_52w_chg,
+          [Price_YTD_price_percent_change]                                      AS price_ytd_chg,
+          [Price_1_Day_%%_Change]                                               AS price_1d_pct_change,
+          [Price_5_Day_%%_Change]                                               AS price_5d_pct_change,
+          [Sharpe_Ratio_3_Year_Weekly]                                          AS sharpe_3y,
+          [Sharpe_Ratio_5_Year_Monthly]                                         AS sharpe_5y,
+          [Earnings_per_Share_Excluding_Extraordinary_Items_Avg._Diluted_Shares_Outstanding_5_Year_Interim_Trend_Volatility_%%] AS eps_trend_vol_5y,
+          [Revenue_Primary_5_Year_Interim_Trend_Volatility_%%]                  AS revenue_trend_vol_5y,
+          [Free_Cash_Flow_Levered_5_Year_Interim_Trend_Volatility_%%]           AS fcf_trend_vol_5y,
+          i.Xref_Ticker AS Ticker
+      FROM [refinitiv].[daily_ratios_and_values] d
+      JOIN [refinitiv].[class20_refinfo_issue] i ON i.RepNo = d.RepNo
+      WHERE i.Xref_Ticker IN (%s)
+        AND [as_of_date] >= '%s'
+      ORDER BY i.Xref_Ticker, [as_of_date] DESC
+    ", ticker_list, start_date)
+    
+    benchmark_ratios <- tryCatch({
+      dbGetQuery(conn, benchmark_sql)
+    }, error = function(e) {
+      message("  ⚠️ Could not fetch benchmark data: ", e$message)
+      return(NULL)
+    })
+    
+    if(!is.null(benchmark_ratios) && nrow(benchmark_ratios) > 0) {
+      # Add to ratios
+      ratios <- bind_rows(ratios, benchmark_ratios)
+      message(sprintf("  Added %d benchmark records (%s)", 
+                      nrow(benchmark_ratios), 
+                      paste(benchmark_tickers, collapse = ", ")))
+    } else {
+      message("  ⚠️ No benchmark data available")
+    }
+  }
+  
+  # Join with ticker for company data (if not already present)
+  if(!"Ticker" %in% names(ratios)) {
+    ratios <- left_join(ratios, company_map[, c("RepNo", "Ticker")], by = "RepNo")
+  }
   
   # Calculate rolling volatility
   if (nrow(ratios) > 0 && "price_1d_pct_change" %in% names(ratios)) {
@@ -92,4 +175,3 @@ pull_daily_ratios <- function(company_map, start_date = "2024-01-01") {
   
   return(ratios)
 }
-

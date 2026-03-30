@@ -1275,6 +1275,104 @@ assign("benchmark_ai_results", benchmark_ai_results, envir = .GlobalEnv)
 
 cat("\n   ✅ Benchmark AI exposure analysis complete\n")
 
+# =============================================================================
+# SECTION 10.8: BENCHMARK ANALYSIS (Phase 3 & 4)
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("📊 SECTION 10.8: BENCHMARK ANALYSIS\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+source("R/04_modules/09_benchmark_returns.r")
+source("R/04_modules/10_ai_themed_benchmarks.r")
+source("R/04_modules/11_control_benchmarks.r")
+
+# 1. Get benchmark returns
+cat("\n📈 Getting benchmark returns...\n")
+benchmark_returns <- get_benchmark_returns(
+  benchmarks = c("S&P 500", "NASDAQ 100", "Russell 2000"),
+  start_date = "2020-01-01"
+)
+
+# 2. Calculate benchmark statistics
+benchmark_stats <- calculate_benchmark_stats(benchmark_returns)
+print(benchmark_stats)
+
+# 3. Create AI-themed benchmarks
+cat("\n🤖 Creating AI-themed benchmarks...\n")
+portfolio_weights <- daii_scored %>%
+  filter(in_portfolio == TRUE) %>%
+  select(ticker, fund_weight, TRBC_Industry)
+
+ai_benchmarks <- create_all_ai_benchmarks(daii_scored, portfolio_weights)
+
+for(b in names(ai_benchmarks)) {
+  cat(sprintf("   %s: %d companies, avg AI score: %.3f\n", 
+              b, ai_benchmarks[[b]]$n_companies, ai_benchmarks[[b]]$avg_ai_score))
+}
+
+# 4. Create matched-pair controls
+cat("\n🔗 Creating matched-pair controls...\n")
+portfolio_companies <- daii_scored %>%
+  filter(in_portfolio == TRUE) %>%
+  select(ticker, company_name, ai_score, fund_weight, market_cap, 
+         revenue_growth, TRBC_Industry)
+
+matched_pairs <- create_matched_controls(portfolio_companies, daii_scored)
+
+cat(sprintf("   Created %d matched pairs\n", nrow(matched_pairs)))
+
+# 5. Create synthetic control (if enough data)
+cat("\n🧠 Creating synthetic control...\n")
+
+# Prepare portfolio returns (need to calculate from holdings)
+# This requires daily returns data for portfolio companies
+if(exists("daily_ratios") && exists("portfolio_holdings")) {
+  
+  # Calculate daily portfolio returns (simplified)
+  portfolio_daily_returns <- daily_ratios %>%
+    filter(Ticker %in% portfolio_holdings$ticker) %>%
+    left_join(portfolio_holdings %>% select(ticker, fund_weight), 
+              by = c("Ticker" = "ticker")) %>%
+    mutate(weighted_return = price_1d_pct_change * fund_weight) %>%
+    group_by(as_of_date) %>%
+    summarise(portfolio_return = sum(weighted_return, na.rm = TRUE)) %>%
+    ungroup() %>%
+    rename(date = as_of_date)
+  
+  # Prepare donor returns (low-AI companies)
+  donor_tickers <- daii_scored %>%
+    filter(ai_label %in% c("AI Laggard", "AI Follower"),
+           !in_portfolio) %>%
+    pull(ticker)
+  
+  donor_returns <- daily_ratios %>%
+    filter(Ticker %in% donor_tickers) %>%
+    select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change)
+  
+  if(length(donor_tickers) >= 5 && nrow(donor_returns) > 0) {
+    synthetic_control <- create_synthetic_control(
+      portfolio_returns = portfolio_daily_returns,
+      donor_returns = donor_returns,
+      method = "ridge"
+    )
+    
+    if(!is.null(synthetic_control)) {
+      cat(sprintf("   Synthetic control created: %d donors, %.1f%% win rate\n", 
+                  synthetic_control$n_donors, synthetic_control$win_rate))
+    }
+  } else {
+    cat("   ⚠️ Insufficient donors for synthetic control\n")
+  }
+}
+
+# Save benchmark results for Section 11
+assign("benchmark_returns", benchmark_returns, envir = .GlobalEnv)
+assign("benchmark_stats", benchmark_stats, envir = .GlobalEnv)
+assign("ai_benchmarks", ai_benchmarks, envir = .GlobalEnv)
+assign("matched_pairs", matched_pairs, envir = .GlobalEnv)
+
+cat("\n   ✅ Benchmark analysis complete\n")
+
 # -----------------------------------------------------------------------------
 # SECTION 12: PERFORMANCE ATTRIBUTION & BENCHMARK COMPARISON
 # -----------------------------------------------------------------------------
