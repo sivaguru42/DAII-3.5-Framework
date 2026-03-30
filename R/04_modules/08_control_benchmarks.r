@@ -61,22 +61,9 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 }
 
 # ============================================================================
-# PART 2: MATCHED-PAIR CONTROLS (ENHANCED WITH EMPTY CONTROL HANDLING)
+# PART 2: MATCHED-PAIR CONTROLS (SIMPLIFIED ROBUST VERSION)
 # ============================================================================
 
-#' Construct Matched-Pair Controls (Enhanced)
-#' 
-#' For each portfolio company, finds a non-AI peer with similar characteristics.
-#' Supports multiple matching methods and k-nearest neighbors.
-#' Handles missing values and empty controls gracefully.
-#' 
-#' @param portfolio_companies Dataframe with portfolio holdings
-#' @param universe Dataframe with all companies and AI scores
-#' @param match_vars Variables to match on
-#' @param k Number of controls per portfolio company (default: 1)
-#' @param method Matching method: "nearest", "radius", or "stratified"
-#' @param radius Radius for radius matching (if method = "radius")
-#' @return List with pairs and quality metrics
 construct_matched_controls <- function(portfolio_companies, 
                                        universe, 
                                        match_vars = c("market_cap", "revenue_growth"),
@@ -93,14 +80,25 @@ construct_matched_controls <- function(portfolio_companies,
     match_vars <- match_vars[match_vars != "TRBC_Industry"]
   }
   
-  # Standardize numeric variables for distance calculation
-  universe_std <- universe %>%
-    mutate(
-      market_cap_z = (log(market_cap) - mean(log(market_cap), na.rm = TRUE)) / 
-        sd(log(market_cap), na.rm = TRUE),
-      revenue_growth_z = (revenue_growth - mean(revenue_growth, na.rm = TRUE)) / 
-        sd(revenue_growth, na.rm = TRUE)
+  # Filter universe to eligible controls once
+  eligible_controls <- universe %>%
+    filter(
+      ai_label %in% c("AI Laggard", "AI Follower"),
+      !is.na(market_cap),
+      market_cap > 0,
+      !is.na(revenue_growth)
     )
+  
+  # Remove portfolio companies from eligible controls
+  eligible_controls <- eligible_controls %>%
+    filter(!ticker %in% portfolio_companies$ticker)
+  
+  message(sprintf("      Eligible controls: %d companies", nrow(eligible_controls)))
+  
+  if(nrow(eligible_controls) == 0) {
+    message("      No eligible controls found")
+    return(list(pairs = data.frame(), quality = data.frame()))
+  }
   
   matches <- data.frame()
   
@@ -108,115 +106,58 @@ construct_matched_controls <- function(portfolio_companies,
     
     portfolio_data <- portfolio_companies[i, ]
     
-    # Find eligible controls (low AI, not in portfolio)
-    controls <- universe_std %>%
-      filter(
-        ai_label %in% c("AI Laggard", "AI Follower"),
-        !ticker %in% portfolio_companies$ticker
-      )
-    
-    if(nrow(controls) == 0) next
-    
-    # Apply industry matching only if column exists and portfolio has valid value
-    if("TRBC_Industry" %in% match_vars && "TRBC_Industry" %in% names(portfolio_data)) {
-      port_industry <- portfolio_data$TRBC_Industry
-      if(!is.na(port_industry) && port_industry != "" && port_industry != "Unknown") {
-        controls <- controls %>% filter(TRBC_Industry == port_industry)
-      }
-    }
-    
-    # Skip if no controls left after filtering
-    if(nrow(controls) == 0) {
-      message(sprintf("      No eligible controls found for %s, skipping", portfolio_data$ticker))
+    # Skip if portfolio company has missing market cap
+    if(is.na(portfolio_data$market_cap) || portfolio_data$market_cap <= 0) {
       next
     }
     
-    # Calculate distance scores (handle NA in portfolio data)
-    port_mcap <- ifelse(is.na(portfolio_data$market_cap), 
-                        median(universe$market_cap, na.rm = TRUE), 
-                        portfolio_data$market_cap)
-    port_growth <- ifelse(is.na(portfolio_data$revenue_growth), 0, portfolio_data$revenue_growth)
+    # Start with all eligible controls
+    controls <- eligible_controls
     
-    # Calculate distances safely - check if controls has rows
-    if(nrow(controls) > 0) {
-      controls <- controls %>%
-        mutate(
-          size_distance = suppressWarnings(abs(log(market_cap) - log(port_mcap)) / 
-                                             (sd(log(universe$market_cap), na.rm = TRUE) + 0.01)),
-          growth_distance = suppressWarnings(abs(revenue_growth - port_growth) / 
-                                               (sd(universe$revenue_growth, na.rm = TRUE) + 0.01)),
-          total_distance = size_distance + growth_distance
-        )
+    # Calculate distance scores for this portfolio company
+    controls <- controls %>%
+      mutate(
+        size_distance = abs(log(market_cap) - log(portfolio_data$market_cap)) / 
+          (sd(log(eligible_controls$market_cap), na.rm = TRUE) + 0.01),
+        growth_distance = abs(revenue_growth - portfolio_data$revenue_growth) / 
+          (sd(eligible_controls$revenue_growth, na.rm = TRUE) + 0.01),
+        total_distance = size_distance + growth_distance
+      )
+    
+    # Handle NA and infinite values
+    controls <- controls %>%
+      mutate(
+        size_distance = ifelse(is.na(size_distance) | is.infinite(size_distance), 999, size_distance),
+        growth_distance = ifelse(is.na(growth_distance) | is.infinite(growth_distance), 999, growth_distance),
+        total_distance = ifelse(is.na(total_distance) | is.infinite(total_distance), 999, total_distance)
+      )
+    
+    # Select best match
+    selected <- controls %>%
+      arrange(total_distance) %>%
+      head(k)
+    
+    if(nrow(selected) > 0) {
+      control <- selected[1, ]
       
-      # Replace infinite values with large number
-      controls <- controls %>%
-        mutate(
-          size_distance = ifelse(is.infinite(size_distance), 999, size_distance),
-          growth_distance = ifelse(is.infinite(growth_distance), 999, growth_distance),
-          total_distance = ifelse(is.infinite(total_distance), 999, total_distance)
-        )
-      
-      # Apply matching method
-      if(method == "nearest") {
-        selected <- controls %>%
-          arrange(total_distance) %>%
-          head(k)
-      } else if(method == "radius") {
-        selected <- controls %>%
-          filter(total_distance <= radius) %>%
-          arrange(total_distance) %>%
-          head(k)
-      } else if(method == "stratified") {
-        controls <- controls %>%
-          mutate(
-            size_quartile = ntile(market_cap, 4),
-            growth_quartile = ntile(revenue_growth, 4)
-          )
-        port_size_q <- ifelse(is.na(portfolio_data$market_cap), 2, 
-                              ntile(portfolio_data$market_cap, 4))
-        port_growth_q <- ifelse(is.na(portfolio_data$revenue_growth), 2,
-                                ntile(portfolio_data$revenue_growth, 4))
-        
-        controls <- controls %>%
-          filter(size_quartile == port_size_q, growth_quartile == port_growth_q)
-        
-        if(nrow(controls) > 0) {
-          selected <- controls %>%
-            arrange(total_distance) %>%
-            head(k)
-        } else {
-          selected <- data.frame()
-        }
-      }
-      
-      # Record matches
-      if(nrow(selected) > 0) {
-        for(j in 1:nrow(selected)) {
-          control <- selected[j, ]
-          
-          matches <- rbind(matches, data.frame(
-            portfolio_ticker = portfolio_data$ticker,
-            portfolio_name = portfolio_data$company_name,
-            portfolio_ai_score = portfolio_data$ai_score,
-            portfolio_weight = portfolio_data$fund_weight,
-            portfolio_mcap = portfolio_data$market_cap,
-            portfolio_growth = portfolio_data$revenue_growth,
-            control_ticker = control$ticker,
-            control_name = control$company_name,
-            control_ai_score = control$ai_score,
-            control_mcap = control$market_cap,
-            control_growth = control$revenue_growth,
-            ai_score_gap = portfolio_data$ai_score - control$ai_score,
-            size_ratio = portfolio_data$market_cap / control$market_cap,
-            growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
-            distance = control$total_distance,
-            sector = ifelse("TRBC_Industry" %in% names(portfolio_data) && !is.na(portfolio_data$TRBC_Industry), 
-                            portfolio_data$TRBC_Industry, "Unknown"),
-            method = method,
-            stringsAsFactors = FALSE
-          ))
-        }
-      }
+      matches <- rbind(matches, data.frame(
+        portfolio_ticker = portfolio_data$ticker,
+        portfolio_name = portfolio_data$company_name,
+        portfolio_ai_score = portfolio_data$ai_score,
+        portfolio_weight = portfolio_data$fund_weight,
+        portfolio_mcap = portfolio_data$market_cap,
+        portfolio_growth = portfolio_data$revenue_growth,
+        control_ticker = control$ticker,
+        control_name = control$company_name,
+        control_ai_score = control$ai_score,
+        control_mcap = control$market_cap,
+        control_growth = control$revenue_growth,
+        ai_score_gap = portfolio_data$ai_score - control$ai_score,
+        size_ratio = portfolio_data$market_cap / control$market_cap,
+        growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
+        distance = control$total_distance,
+        stringsAsFactors = FALSE
+      ))
     }
   }
   
@@ -229,8 +170,6 @@ construct_matched_controls <- function(portfolio_companies,
         unique_portfolio_companies = n_distinct(portfolio_ticker),
         avg_ai_gap = mean(ai_score_gap, na.rm = TRUE),
         median_ai_gap = median(ai_score_gap, na.rm = TRUE),
-        avg_size_ratio = mean(size_ratio, na.rm = TRUE),
-        avg_growth_diff = mean(growth_diff, na.rm = TRUE),
         avg_distance = mean(distance, na.rm = TRUE),
         pct_good_matches = mean(distance < 1, na.rm = TRUE) * 100,
         .groups = "drop"
@@ -248,76 +187,6 @@ construct_matched_controls <- function(portfolio_companies,
     pairs = matches,
     quality = quality_metrics
   ))
-}
-
-#' Calculate Matched-Pair Returns
-#' 
-#' For each matched pair, calculate the return difference (AI alpha)
-#' 
-#' @param matched_pairs Dataframe from construct_matched_controls
-#' @param returns_data Daily returns for all companies
-#' @return Dataframe with daily alpha series
-calculate_matched_pair_alpha <- function(matched_pairs, returns_data) {
-  
-  message("   Calculating matched-pair alpha...")
-  
-  if(nrow(matched_pairs) == 0) {
-    message("      No matched pairs to calculate")
-    return(NULL)
-  }
-  
-  # Get unique tickers from both portfolios and controls
-  all_tickers <- unique(c(matched_pairs$portfolio_ticker, matched_pairs$control_ticker))
-  
-  # Get returns for all tickers
-  returns_wide <- returns_data %>%
-    filter(ticker %in% all_tickers) %>%
-    select(date, ticker, daily_return) %>%
-    pivot_wider(id_cols = date, names_from = ticker, values_from = daily_return)
-  
-  # Calculate daily alpha for each pair (portfolio - control)
-  alpha_series <- data.frame(date = returns_wide$date)
-  
-  for(i in 1:nrow(matched_pairs)) {
-    port_ticker <- matched_pairs$portfolio_ticker[i]
-    ctrl_ticker <- matched_pairs$control_ticker[i]
-    
-    if(port_ticker %in% names(returns_wide) && ctrl_ticker %in% names(returns_wide)) {
-      pair_alpha <- returns_wide[[port_ticker]] - returns_wide[[ctrl_ticker]]
-      alpha_series[[paste0(port_ticker, "_alpha")]] <- pair_alpha
-    }
-  }
-  
-  # Calculate average alpha across all pairs (weighted by portfolio weight)
-  if(ncol(alpha_series) > 1) {
-    weight_map <- setNames(matched_pairs$portfolio_weight, matched_pairs$portfolio_ticker)
-    
-    alpha_cols <- names(alpha_series)[-1]
-    weighted_alpha <- rep(0, nrow(alpha_series))
-    total_weight <- 0
-    
-    for(col in alpha_cols) {
-      ticker <- gsub("_alpha", "", col)
-      weight <- weight_map[ticker]
-      if(!is.na(weight)) {
-        weighted_alpha <- weighted_alpha + alpha_series[[col]] * weight
-        total_weight <- total_weight + weight
-      }
-    }
-    
-    if(total_weight > 0) {
-      weighted_alpha <- weighted_alpha / total_weight
-    }
-    
-    result <- data.frame(
-      date = alpha_series$date,
-      alpha = weighted_alpha
-    )
-  } else {
-    result <- data.frame(date = alpha_series$date, alpha = 0)
-  }
-  
-  return(result)
 }
 
 # ============================================================================
