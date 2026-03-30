@@ -1,7 +1,7 @@
 # ============================================================================
 # CONTROL BENCHMARK ANALYSIS MODULE
-# Version: 3.0 | Date: 2026-03-30
-# Description: AI-Low benchmark, Matched-Pair controls, and Synthetic Control
+# Version: 3.1 | Date: 2026-03-30
+# Description: AI-Low benchmark, Matched-Pair controls (enhanced), and Synthetic Control
 # ============================================================================
 
 library(dplyr)
@@ -61,13 +61,14 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 }
 
 # ============================================================================
-# PART 2: MATCHED-PAIR CONTROLS (Phase 4A)
+# PART 2: MATCHED-PAIR CONTROLS (ENHANCED)
 # ============================================================================
 
 #' Construct Matched-Pair Controls (Enhanced)
 #' 
 #' For each portfolio company, finds a non-AI peer with similar characteristics.
 #' Supports multiple matching methods and k-nearest neighbors.
+#' Handles missing values gracefully.
 #' 
 #' @param portfolio_companies Dataframe with portfolio holdings
 #' @param universe Dataframe with all companies and AI scores
@@ -110,19 +111,27 @@ construct_matched_controls <- function(portfolio_companies,
     
     if(nrow(controls) == 0) next
     
-    # Apply matching criteria
+    # Apply matching criteria (skip if portfolio has NA industry)
     if("TRBC_Industry" %in% match_vars) {
-      controls <- controls %>% filter(TRBC_Industry == portfolio_data$TRBC_Industry)
+      if(!is.na(portfolio_data$TRBC_Industry) && portfolio_data$TRBC_Industry != "") {
+        controls <- controls %>% filter(TRBC_Industry == portfolio_data$TRBC_Industry)
+      }
+      # If portfolio has NA industry, skip industry matching
     }
     
     if(nrow(controls) == 0) next
     
-    # Calculate distance scores
+    # Calculate distance scores (handle NA in portfolio data)
+    port_mcap <- ifelse(is.na(portfolio_data$market_cap), 
+                        median(universe$market_cap, na.rm = TRUE), 
+                        portfolio_data$market_cap)
+    port_growth <- ifelse(is.na(portfolio_data$revenue_growth), 0, portfolio_data$revenue_growth)
+    
     controls <- controls %>%
       mutate(
-        size_distance = abs(log(market_cap) - log(portfolio_data$market_cap)) / 
+        size_distance = abs(log(market_cap) - log(port_mcap)) / 
           (sd(log(universe$market_cap), na.rm = TRUE) + 0.01),
-        growth_distance = abs(revenue_growth - portfolio_data$revenue_growth) / 
+        growth_distance = abs(revenue_growth - port_growth) / 
           (sd(universe$revenue_growth, na.rm = TRUE) + 0.01),
         total_distance = size_distance + growth_distance
       )
@@ -142,9 +151,14 @@ construct_matched_controls <- function(portfolio_companies,
         mutate(
           size_quartile = ntile(market_cap, 4),
           growth_quartile = ntile(revenue_growth, 4)
-        ) %>%
-        filter(size_quartile == ntile(portfolio_data$market_cap, 4),
-               growth_quartile == ntile(portfolio_data$revenue_growth, 4))
+        )
+      port_size_q <- ifelse(is.na(portfolio_data$market_cap), 2, 
+                            ntile(portfolio_data$market_cap, 4))
+      port_growth_q <- ifelse(is.na(portfolio_data$revenue_growth), 2,
+                              ntile(portfolio_data$revenue_growth, 4))
+      
+      controls <- controls %>%
+        filter(size_quartile == port_size_q, growth_quartile == port_growth_q)
       
       if(nrow(controls) > 0) {
         selected <- controls %>%
@@ -176,7 +190,7 @@ construct_matched_controls <- function(portfolio_companies,
           size_ratio = portfolio_data$market_cap / control$market_cap,
           growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
           distance = control$total_distance,
-          sector = portfolio_data$TRBC_Industry,
+          sector = ifelse(is.na(portfolio_data$TRBC_Industry), "Unknown", portfolio_data$TRBC_Industry),
           method = method,
           stringsAsFactors = FALSE
         ))
@@ -285,16 +299,15 @@ calculate_matched_pair_alpha <- function(matched_pairs, returns_data) {
 }
 
 # ============================================================================
-# PART 3: SYNTHETIC CONTROL (Phase 4B)
+# PART 3: SYNTHETIC CONTROL
 # ============================================================================
 
 #' Calculate AI Alpha using Synthetic Control
 #' 
 #' Uses machine learning (ridge regression) to create a synthetic portfolio
 #' from low-AI donor companies that best matches the actual portfolio.
-#' The difference between actual and synthetic returns = AI alpha.
 #' 
-#' @param portfolio_returns Portfolio return time series (dataframe with date and portfolio_return)
+#' @param portfolio_returns Portfolio return time series
 #' @param donor_returns Returns of donor companies (low-AI universe)
 #' @param donor_ai_scores Optional vector of AI scores for donors
 #' @param method Method for optimization: "ridge", "lasso", or "equal"
@@ -333,7 +346,7 @@ calculate_synthetic_alpha <- function(portfolio_returns,
   X <- as.matrix(donor_wide[, -1])
   y <- target_returns
   
-  # Handle NA values (replace with 0 for missing returns)
+  # Handle NA values
   X[is.na(X)] <- 0
   
   # Split into training and validation sets
@@ -371,21 +384,15 @@ calculate_synthetic_alpha <- function(portfolio_returns,
   } else if(method == "equal") {
     weights <- rep(1/ncol(X), ncol(X))
     r_squared <- NA
-    
-  } else if(method == "market_cap") {
-    # Would need market cap data - fallback to equal weight
+  } else {
     weights <- rep(1/ncol(X), ncol(X))
     r_squared <- NA
   }
   
-  # Calculate synthetic returns (in-sample and out-of-sample)
-  synthetic_returns_train <- as.vector(X_train %*% weights)
-  synthetic_returns_test <- as.vector(X_test %*% weights)
+  # Calculate synthetic returns
   synthetic_returns_all <- as.vector(X %*% weights)
   
   # Calculate AI alpha
-  ai_alpha_train <- y_train - synthetic_returns_train
-  ai_alpha_test <- y_test - synthetic_returns_test
   ai_alpha_all <- y - synthetic_returns_all
   
   # Calculate metrics
@@ -414,8 +421,6 @@ calculate_synthetic_alpha <- function(portfolio_returns,
     r_squared = r_squared,
     synthetic_returns = synthetic_returns_all,
     ai_alpha = ai_alpha_all,
-    ai_alpha_train = ai_alpha_train,
-    ai_alpha_test = ai_alpha_test,
     cumulative_alpha = cumprod(1 + ai_alpha_all) - 1,
     mean_alpha = mean(ai_alpha_all, na.rm = TRUE),
     alpha_annualized = alpha_annualized,
@@ -464,7 +469,7 @@ prepare_donor_pool <- function(daii_scored, exclude_tickers = NULL, ai_threshold
 }
 
 # ============================================================================
-# PART 4: COMPARISON FUNCTION (All Methods)
+# PART 4: COMPARISON FUNCTION
 # ============================================================================
 
 #' Compare All Control Methods
@@ -494,7 +499,6 @@ compare_control_methods <- function(portfolio_returns,
         filter(benchmark == "SPX") %>% 
         pull(return)
       
-      # Align lengths
       min_len <- min(length(portfolio_returns$portfolio_return), length(spx_returns))
       excess <- tail(portfolio_returns$portfolio_return, min_len) - tail(spx_returns, min_len)
       
