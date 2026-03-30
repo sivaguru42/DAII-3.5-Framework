@@ -1276,100 +1276,62 @@ assign("benchmark_ai_results", benchmark_ai_results, envir = .GlobalEnv)
 cat("\n   ✅ Benchmark AI exposure analysis complete\n")
 
 # =============================================================================
-# SECTION 10.8: BENCHMARK ANALYSIS (Phase 3 & 4)
+# SECTION 10.8: BENCHMARK ANALYSIS (Control Benchmarks)
 # =============================================================================
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("📊 SECTION 10.8: BENCHMARK ANALYSIS\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-source("R/04_modules/09_benchmark_returns.r")
-source("R/04_modules/10_ai_themed_benchmarks.r")
-source("R/04_modules/11_control_benchmarks.r")
+# Source the control benchmarks module (use the correct filename)
+module_file <- "R/04_modules/08_control_benchmarks.r"
 
-# 1. Get benchmark returns
-cat("\n📈 Getting benchmark returns...\n")
-benchmark_returns <- get_benchmark_returns(
-  benchmarks = c("S&P 500", "NASDAQ 100", "Russell 2000"),
-  start_date = "2020-01-01"
-)
-
-# 2. Calculate benchmark statistics
-benchmark_stats <- calculate_benchmark_stats(benchmark_returns)
-print(benchmark_stats)
-
-# 3. Create AI-themed benchmarks
-cat("\n🤖 Creating AI-themed benchmarks...\n")
-portfolio_weights <- daii_scored %>%
-  filter(in_portfolio == TRUE) %>%
-  select(ticker, fund_weight, TRBC_Industry)
-
-ai_benchmarks <- create_all_ai_benchmarks(daii_scored, portfolio_weights)
-
-for(b in names(ai_benchmarks)) {
-  cat(sprintf("   %s: %d companies, avg AI score: %.3f\n", 
-              b, ai_benchmarks[[b]]$n_companies, ai_benchmarks[[b]]$avg_ai_score))
-}
-
-# 4. Create matched-pair controls
-cat("\n🔗 Creating matched-pair controls...\n")
-portfolio_companies <- daii_scored %>%
-  filter(in_portfolio == TRUE) %>%
-  select(ticker, company_name, ai_score, fund_weight, market_cap, 
-         revenue_growth, TRBC_Industry)
-
-matched_pairs <- create_matched_controls(portfolio_companies, daii_scored)
-
-cat(sprintf("   Created %d matched pairs\n", nrow(matched_pairs)))
-
-# 5. Create synthetic control (if enough data)
-cat("\n🧠 Creating synthetic control...\n")
-
-# Prepare portfolio returns (need to calculate from holdings)
-# This requires daily returns data for portfolio companies
-if(exists("daily_ratios") && exists("portfolio_holdings")) {
+if(file.exists(module_file)) {
+  source(module_file)
+  cat("   ✅ Loaded control benchmarks module\n")
   
-  # Calculate daily portfolio returns (simplified)
-  portfolio_daily_returns <- daily_ratios %>%
-    filter(Ticker %in% portfolio_holdings$ticker) %>%
-    left_join(portfolio_holdings %>% select(ticker, fund_weight), 
-              by = c("Ticker" = "ticker")) %>%
-    mutate(weighted_return = price_1d_pct_change * fund_weight) %>%
-    group_by(as_of_date) %>%
-    summarise(portfolio_return = sum(weighted_return, na.rm = TRUE)) %>%
-    ungroup() %>%
-    rename(date = as_of_date)
-  
-  # Prepare donor returns (low-AI companies)
-  donor_tickers <- daii_scored %>%
-    filter(ai_label %in% c("AI Laggard", "AI Follower"),
-           !in_portfolio) %>%
-    pull(ticker)
-  
-  donor_returns <- daily_ratios %>%
-    filter(Ticker %in% donor_tickers) %>%
-    select(date = as_of_date, ticker = Ticker, daily_return = price_1d_pct_change)
-  
-  if(length(donor_tickers) >= 5 && nrow(donor_returns) > 0) {
-    synthetic_control <- create_synthetic_control(
-      portfolio_returns = portfolio_daily_returns,
-      donor_returns = donor_returns,
-      method = "ridge"
+  # Check if we have the required data
+  if(exists("daii_scored") && exists("portfolio_holdings")) {
+    
+    # Test 1: AI-Low Benchmark
+    cat("\n🤖 Creating AI-Low benchmark...\n")
+    ai_low_benchmark <- construct_ai_low_benchmark(
+      daii_scored = daii_scored,
+      portfolio_weights = portfolio_holdings,
+      n_components = 100
+    )
+    cat(sprintf("   AI-Low benchmark: %d companies\n", nrow(ai_low_benchmark)))
+    
+    # Test 2: Matched-Pair Controls (using first 50 portfolio companies for speed)
+    cat("\n🔗 Creating matched-pair controls...\n")
+    matched_controls <- construct_matched_controls(
+      portfolio_companies = portfolio_holdings %>% head(50),
+      universe = daii_scored,
+      match_vars = c("TRBC_Industry", "market_cap", "revenue_growth"),
+      k = 1,
+      method = "nearest"
     )
     
-    if(!is.null(synthetic_control)) {
-      cat(sprintf("   Synthetic control created: %d donors, %.1f%% win rate\n", 
-                  synthetic_control$n_donors, synthetic_control$win_rate))
+    if(nrow(matched_controls$pairs) > 0) {
+      cat(sprintf("   Matched pairs: %d\n", nrow(matched_controls$pairs)))
+      cat(sprintf("   Average AI gap: %.3f\n", matched_controls$quality$avg_ai_gap))
+      cat(sprintf("   Good matches: %.1f%%\n", matched_controls$quality$pct_good_matches))
+    } else {
+      cat("   No matches found\n")
     }
+    
+    # Store results for Section 11
+    assign("ai_low_benchmark", ai_low_benchmark, envir = .GlobalEnv)
+    assign("matched_controls", matched_controls, envir = .GlobalEnv)
+    
   } else {
-    cat("   ⚠️ Insufficient donors for synthetic control\n")
+    cat("   ⚠️ Missing daii_scored or portfolio_holdings\n")
   }
+  
+} else {
+  cat(sprintf("   ⚠️ Module not found: %s\n", module_file))
+  cat("   Available modules:\n")
+  print(list.files("R/04_modules/", pattern = "\\.r$"))
 }
-
-# Save benchmark results for Section 11
-assign("benchmark_returns", benchmark_returns, envir = .GlobalEnv)
-assign("benchmark_stats", benchmark_stats, envir = .GlobalEnv)
-assign("ai_benchmarks", ai_benchmarks, envir = .GlobalEnv)
-assign("matched_pairs", matched_pairs, envir = .GlobalEnv)
 
 cat("\n   ✅ Benchmark analysis complete\n")
 
