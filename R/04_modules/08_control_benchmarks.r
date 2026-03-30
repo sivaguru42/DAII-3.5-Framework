@@ -1,6 +1,6 @@
 # ============================================================================
 # CONTROL BENCHMARK ANALYSIS MODULE
-# Version: 3.1 | Date: 2026-03-30
+# Version: 3.2 | Date: 2026-03-30
 # Description: AI-Low benchmark, Matched-Pair controls (enhanced), and Synthetic Control
 # ============================================================================
 
@@ -61,14 +61,14 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 }
 
 # ============================================================================
-# PART 2: MATCHED-PAIR CONTROLS (ENHANCED)
+# PART 2: MATCHED-PAIR CONTROLS (ENHANCED WITH EMPTY CONTROL HANDLING)
 # ============================================================================
 
 #' Construct Matched-Pair Controls (Enhanced)
 #' 
 #' For each portfolio company, finds a non-AI peer with similar characteristics.
 #' Supports multiple matching methods and k-nearest neighbors.
-#' Handles missing values gracefully.
+#' Handles missing values and empty controls gracefully.
 #' 
 #' @param portfolio_companies Dataframe with portfolio holdings
 #' @param universe Dataframe with all companies and AI scores
@@ -79,13 +79,19 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 #' @return List with pairs and quality metrics
 construct_matched_controls <- function(portfolio_companies, 
                                        universe, 
-                                       match_vars = c("TRBC_Industry", "market_cap", "revenue_growth"),
+                                       match_vars = c("market_cap", "revenue_growth"),
                                        k = 1,
                                        method = "nearest",
                                        radius = 0.5) {
   
   message("   Constructing matched-pair controls...")
   message(sprintf("      Method: %s, k = %d", method, k))
+  
+  # Remove TRBC_Industry from match_vars if not available in portfolio
+  if("TRBC_Industry" %in% match_vars && !"TRBC_Industry" %in% names(portfolio_companies)) {
+    message("      TRBC_Industry not in portfolio, removing from match_vars")
+    match_vars <- match_vars[match_vars != "TRBC_Industry"]
+  }
   
   # Standardize numeric variables for distance calculation
   universe_std <- universe %>%
@@ -111,14 +117,15 @@ construct_matched_controls <- function(portfolio_companies,
     
     if(nrow(controls) == 0) next
     
-    # Apply matching criteria (skip if portfolio has NA industry)
-    if("TRBC_Industry" %in% match_vars) {
-      if(!is.na(portfolio_data$TRBC_Industry) && portfolio_data$TRBC_Industry != "") {
-        controls <- controls %>% filter(TRBC_Industry == portfolio_data$TRBC_Industry)
+    # Apply industry matching only if column exists and portfolio has valid value
+    if("TRBC_Industry" %in% match_vars && "TRBC_Industry" %in% names(portfolio_data)) {
+      port_industry <- portfolio_data$TRBC_Industry
+      if(!is.na(port_industry) && port_industry != "" && port_industry != "Unknown") {
+        controls <- controls %>% filter(TRBC_Industry == port_industry)
       }
-      # If portfolio has NA industry, skip industry matching
     }
     
+    # Skip if no controls left after filtering
     if(nrow(controls) == 0) next
     
     # Calculate distance scores (handle NA in portfolio data)
@@ -127,13 +134,22 @@ construct_matched_controls <- function(portfolio_companies,
                         portfolio_data$market_cap)
     port_growth <- ifelse(is.na(portfolio_data$revenue_growth), 0, portfolio_data$revenue_growth)
     
+    # Calculate distances safely
     controls <- controls %>%
       mutate(
-        size_distance = abs(log(market_cap) - log(port_mcap)) / 
-          (sd(log(universe$market_cap), na.rm = TRUE) + 0.01),
-        growth_distance = abs(revenue_growth - port_growth) / 
-          (sd(universe$revenue_growth, na.rm = TRUE) + 0.01),
+        size_distance = suppressWarnings(abs(log(market_cap) - log(port_mcap)) / 
+                                           (sd(log(universe$market_cap), na.rm = TRUE) + 0.01)),
+        growth_distance = suppressWarnings(abs(revenue_growth - port_growth) / 
+                                             (sd(universe$revenue_growth, na.rm = TRUE) + 0.01)),
         total_distance = size_distance + growth_distance
+      )
+    
+    # Replace infinite values with large number
+    controls <- controls %>%
+      mutate(
+        size_distance = ifelse(is.infinite(size_distance), 999, size_distance),
+        growth_distance = ifelse(is.infinite(growth_distance), 999, growth_distance),
+        total_distance = ifelse(is.infinite(total_distance), 999, total_distance)
       )
     
     # Apply matching method
@@ -190,7 +206,8 @@ construct_matched_controls <- function(portfolio_companies,
           size_ratio = portfolio_data$market_cap / control$market_cap,
           growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
           distance = control$total_distance,
-          sector = ifelse(is.na(portfolio_data$TRBC_Industry), "Unknown", portfolio_data$TRBC_Industry),
+          sector = ifelse("TRBC_Industry" %in% names(portfolio_data) && !is.na(portfolio_data$TRBC_Industry), 
+                          portfolio_data$TRBC_Industry, "Unknown"),
           method = method,
           stringsAsFactors = FALSE
         ))
@@ -219,7 +236,7 @@ construct_matched_controls <- function(portfolio_companies,
     message(sprintf("      Average AI gap: %.3f", quality_metrics$avg_ai_gap[1]))
     message(sprintf("      Good matches (distance < 1): %.1f%%", quality_metrics$pct_good_matches[1]))
   } else {
-    message("      No matches found")
+    message("      No matches found - no eligible control companies available")
   }
   
   return(list(
