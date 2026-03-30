@@ -1,6 +1,6 @@
 # ============================================================================
 # CONTROL BENCHMARK ANALYSIS MODULE
-# Version: 3.2 | Date: 2026-03-30
+# Version: 3.3 | Date: 2026-03-30
 # Description: AI-Low benchmark, Matched-Pair controls (enhanced), and Synthetic Control
 # ============================================================================
 
@@ -126,7 +126,10 @@ construct_matched_controls <- function(portfolio_companies,
     }
     
     # Skip if no controls left after filtering
-    if(nrow(controls) == 0) next
+    if(nrow(controls) == 0) {
+      message(sprintf("      No eligible controls found for %s, skipping", portfolio_data$ticker))
+      next
+    }
     
     # Calculate distance scores (handle NA in portfolio data)
     port_mcap <- ifelse(is.na(portfolio_data$market_cap), 
@@ -134,83 +137,85 @@ construct_matched_controls <- function(portfolio_companies,
                         portfolio_data$market_cap)
     port_growth <- ifelse(is.na(portfolio_data$revenue_growth), 0, portfolio_data$revenue_growth)
     
-    # Calculate distances safely
-    controls <- controls %>%
-      mutate(
-        size_distance = suppressWarnings(abs(log(market_cap) - log(port_mcap)) / 
-                                           (sd(log(universe$market_cap), na.rm = TRUE) + 0.01)),
-        growth_distance = suppressWarnings(abs(revenue_growth - port_growth) / 
-                                             (sd(universe$revenue_growth, na.rm = TRUE) + 0.01)),
-        total_distance = size_distance + growth_distance
-      )
-    
-    # Replace infinite values with large number
-    controls <- controls %>%
-      mutate(
-        size_distance = ifelse(is.infinite(size_distance), 999, size_distance),
-        growth_distance = ifelse(is.infinite(growth_distance), 999, growth_distance),
-        total_distance = ifelse(is.infinite(total_distance), 999, total_distance)
-      )
-    
-    # Apply matching method
-    if(method == "nearest") {
-      selected <- controls %>%
-        arrange(total_distance) %>%
-        head(k)
-    } else if(method == "radius") {
-      selected <- controls %>%
-        filter(total_distance <= radius) %>%
-        arrange(total_distance) %>%
-        head(k)
-    } else if(method == "stratified") {
+    # Calculate distances safely - check if controls has rows
+    if(nrow(controls) > 0) {
       controls <- controls %>%
         mutate(
-          size_quartile = ntile(market_cap, 4),
-          growth_quartile = ntile(revenue_growth, 4)
+          size_distance = suppressWarnings(abs(log(market_cap) - log(port_mcap)) / 
+                                             (sd(log(universe$market_cap), na.rm = TRUE) + 0.01)),
+          growth_distance = suppressWarnings(abs(revenue_growth - port_growth) / 
+                                               (sd(universe$revenue_growth, na.rm = TRUE) + 0.01)),
+          total_distance = size_distance + growth_distance
         )
-      port_size_q <- ifelse(is.na(portfolio_data$market_cap), 2, 
-                            ntile(portfolio_data$market_cap, 4))
-      port_growth_q <- ifelse(is.na(portfolio_data$revenue_growth), 2,
-                              ntile(portfolio_data$revenue_growth, 4))
       
+      # Replace infinite values with large number
       controls <- controls %>%
-        filter(size_quartile == port_size_q, growth_quartile == port_growth_q)
+        mutate(
+          size_distance = ifelse(is.infinite(size_distance), 999, size_distance),
+          growth_distance = ifelse(is.infinite(growth_distance), 999, growth_distance),
+          total_distance = ifelse(is.infinite(total_distance), 999, total_distance)
+        )
       
-      if(nrow(controls) > 0) {
+      # Apply matching method
+      if(method == "nearest") {
         selected <- controls %>%
           arrange(total_distance) %>%
           head(k)
-      } else {
-        selected <- data.frame()
-      }
-    }
-    
-    # Record matches
-    if(nrow(selected) > 0) {
-      for(j in 1:nrow(selected)) {
-        control <- selected[j, ]
+      } else if(method == "radius") {
+        selected <- controls %>%
+          filter(total_distance <= radius) %>%
+          arrange(total_distance) %>%
+          head(k)
+      } else if(method == "stratified") {
+        controls <- controls %>%
+          mutate(
+            size_quartile = ntile(market_cap, 4),
+            growth_quartile = ntile(revenue_growth, 4)
+          )
+        port_size_q <- ifelse(is.na(portfolio_data$market_cap), 2, 
+                              ntile(portfolio_data$market_cap, 4))
+        port_growth_q <- ifelse(is.na(portfolio_data$revenue_growth), 2,
+                                ntile(portfolio_data$revenue_growth, 4))
         
-        matches <- rbind(matches, data.frame(
-          portfolio_ticker = portfolio_data$ticker,
-          portfolio_name = portfolio_data$company_name,
-          portfolio_ai_score = portfolio_data$ai_score,
-          portfolio_weight = portfolio_data$fund_weight,
-          portfolio_mcap = portfolio_data$market_cap,
-          portfolio_growth = portfolio_data$revenue_growth,
-          control_ticker = control$ticker,
-          control_name = control$company_name,
-          control_ai_score = control$ai_score,
-          control_mcap = control$market_cap,
-          control_growth = control$revenue_growth,
-          ai_score_gap = portfolio_data$ai_score - control$ai_score,
-          size_ratio = portfolio_data$market_cap / control$market_cap,
-          growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
-          distance = control$total_distance,
-          sector = ifelse("TRBC_Industry" %in% names(portfolio_data) && !is.na(portfolio_data$TRBC_Industry), 
-                          portfolio_data$TRBC_Industry, "Unknown"),
-          method = method,
-          stringsAsFactors = FALSE
-        ))
+        controls <- controls %>%
+          filter(size_quartile == port_size_q, growth_quartile == port_growth_q)
+        
+        if(nrow(controls) > 0) {
+          selected <- controls %>%
+            arrange(total_distance) %>%
+            head(k)
+        } else {
+          selected <- data.frame()
+        }
+      }
+      
+      # Record matches
+      if(nrow(selected) > 0) {
+        for(j in 1:nrow(selected)) {
+          control <- selected[j, ]
+          
+          matches <- rbind(matches, data.frame(
+            portfolio_ticker = portfolio_data$ticker,
+            portfolio_name = portfolio_data$company_name,
+            portfolio_ai_score = portfolio_data$ai_score,
+            portfolio_weight = portfolio_data$fund_weight,
+            portfolio_mcap = portfolio_data$market_cap,
+            portfolio_growth = portfolio_data$revenue_growth,
+            control_ticker = control$ticker,
+            control_name = control$company_name,
+            control_ai_score = control$ai_score,
+            control_mcap = control$market_cap,
+            control_growth = control$revenue_growth,
+            ai_score_gap = portfolio_data$ai_score - control$ai_score,
+            size_ratio = portfolio_data$market_cap / control$market_cap,
+            growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
+            distance = control$total_distance,
+            sector = ifelse("TRBC_Industry" %in% names(portfolio_data) && !is.na(portfolio_data$TRBC_Industry), 
+                            portfolio_data$TRBC_Industry, "Unknown"),
+            method = method,
+            stringsAsFactors = FALSE
+          ))
+        }
       }
     }
   }
