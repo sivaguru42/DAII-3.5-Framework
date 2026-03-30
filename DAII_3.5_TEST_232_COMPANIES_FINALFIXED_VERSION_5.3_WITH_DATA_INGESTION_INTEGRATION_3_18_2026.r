@@ -1553,6 +1553,86 @@ if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(dai
 cat("\n   ✅ Performance attribution section complete\n")
 
 # =============================================================================
+# SECTION 10.9: UNIVERSAL CONTROL PANEL
+# =============================================================================
+cat("\n", paste(rep("=", 80), collapse = ""), "\n")
+cat("🎯 SECTION 10.9: UNIVERSAL CONTROL PANEL\n")
+cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+source("R/04_modules/09_universal_control_panel.r")
+
+# Check if universal panel already exists
+panel_file <- "data/00_reference/universal_control_panel.rds"
+
+if(file.exists(panel_file) && !force_refresh) {
+  cat("   Loading existing universal control panel...\n")
+  universal_panel <- readRDS(panel_file)
+  panel_metadata <- readRDS("data/00_reference/universal_control_panel_metadata.rds")
+  select_matches <- readRDS("data/00_reference/control_selection_function.rds")
+  
+  cat(sprintf("   Panel size: %d controls\n", nrow(universal_panel)))
+  cat(sprintf("   Design date: %s\n", panel_metadata$design_date))
+  cat(sprintf("   Achievable power: %.1f%%\n", panel_metadata$achievable_power * 100))
+  
+} else {
+  cat("   Designing new universal control panel...\n")
+  universal_panel_result <- design_universal_control_panel(
+    daii_scored = daii_scored,
+    target_power = 0.8,
+    min_controls_per_stratum = 10,
+    effect_size_estimate = 0.005
+  )
+  
+  universal_panel <- universal_panel_result$panel
+  panel_metadata <- universal_panel_result$metadata
+  select_matches <- universal_panel_result$select_matches
+  
+  cat("\n   ✅ Universal control panel created\n")
+}
+
+# Calculate power for current portfolio
+portfolio_power <- calculate_power(
+  portfolio_size = nrow(portfolio_holdings),
+  effect_size = 0.005
+)
+
+cat("\n📊 POWER ANALYSIS FOR CURRENT PORTFOLIO:\n")
+cat(sprintf("   Portfolio size: %d companies\n", portfolio_power$portfolio_size))
+cat(sprintf("   Control panel size: %d companies\n", portfolio_power$control_panel_size))
+cat(sprintf("   Effective sample size: %.1f\n", portfolio_power$effective_n))
+cat(sprintf("   Statistical power: %.1f%%\n", portfolio_power$power * 100))
+cat(sprintf("   Interpretation: %s\n", portfolio_power$interpretation))
+
+# Match portfolio to universal panel
+cat("\n🔗 Matching portfolio to universal control panel...\n")
+universal_matches <- select_matches(
+  test_companies = portfolio_holdings,
+  method = "optimal"
+)
+
+cat(sprintf("   Created %d matched pairs\n", nrow(universal_matches)))
+cat(sprintf("   Average AI gap: %.3f\n", mean(universal_matches$ai_score_gap, na.rm = TRUE)))
+cat(sprintf("   Average match quality: %.3f\n", mean(universal_matches$match_quality, na.rm = TRUE)))
+
+# Run power simulation (optional, can be commented out for production)
+if(FALSE) {  # Set to TRUE to run simulation (takes time)
+  cat("\n🔬 Running power simulation...\n")
+  simulation_results <- simulate_power(
+    universal_panel = list(panel = universal_panel),
+    n_simulations = 100,
+    effect_sizes = c(0.002, 0.005, 0.01)
+  )
+  print(simulation_results)
+}
+
+# Store results
+assign("universal_panel", universal_panel, envir = .GlobalEnv)
+assign("universal_matches", universal_matches, envir = .GlobalEnv)
+assign("portfolio_power", portfolio_power, envir = .GlobalEnv)
+
+cat("\n   ✅ Universal control panel analysis complete\n")
+
+# =============================================================================
 # SECTION 11: OUTPUT GENERATION
 # =============================================================================
 cat(paste(rep("=", 80), collapse = ""), "\n")
@@ -2015,10 +2095,93 @@ metadata_base <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# Imputation metadata (only if imputed data exists)
-if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+# ============================================================================
+# IMPUTATION METADATA (from Innovation Scoring module)
+# ============================================================================
+
+# Check if daii_scored exists and has imputation flags
+if(exists("daii_scored")) {
   
-  # Get list of imputed companies
+  # Count imputed companies from innovation scoring
+  rd_imputed_count <- if("rd_imputed" %in% names(daii_scored)) sum(daii_scored$rd_imputed, na.rm = TRUE) else 0
+  growth_imputed_count <- if("growth_imputed" %in% names(daii_scored)) sum(daii_scored$growth_imputed, na.rm = TRUE) else 0
+  volatility_imputed_count <- if("volatility_imputed" %in% names(daii_scored)) sum(daii_scored$volatility_imputed, na.rm = TRUE) else 0
+  innovation_imputed_count <- if("innovation_imputed" %in% names(daii_scored)) sum(daii_scored$innovation_imputed, na.rm = TRUE) else 0
+  
+  # Get list of companies with imputed innovation scores
+  if("innovation_imputed" %in% names(daii_scored) && innovation_imputed_count > 0) {
+    imputed_companies <- daii_scored %>%
+      filter(innovation_imputed == TRUE) %>%
+      arrange(ticker) %>%
+      pull(ticker)
+    imputed_companies_list <- paste(imputed_companies, collapse = ", ")
+  } else {
+    imputed_companies_list <- "None"
+  }
+  
+  # Create imputation methodology text
+  imputation_method <- paste(
+    "For companies missing data, the following imputation methodology was applied in the Innovation Scoring module:",
+    "",
+    "1. R&D Intensity (rd_intensity):",
+    "   - Step 1: Estimate from patent activity (log-normalized)",
+    "   - Step 2: Industry median",
+    "   - Step 3: Default 1%",
+    "",
+    "2. Revenue Growth (revenue_growth):",
+    "   - Median of available values",
+    "",
+    "3. Volatility:",
+    "   - Median of available values",
+    "",
+    "4. Innovation Score:",
+    "   - Weighted average of quartiles (may include imputed components)",
+    "   - Default 0.5 if all components missing",
+    "",
+    "Companies with imputed scores have corresponding flags (rd_imputed, growth_imputed,",
+    "volatility_imputed, innovation_imputed) set to TRUE.",
+    "These estimates should be considered directional and validated with fundamental research.",
+    sep = "\n"
+  )
+  
+  metadata_imputation <- data.frame(
+    Field = c(
+      "⚠️ Data Imputation Note",
+      "Imputation Method - R&D Intensity",
+      "Imputation Method - Revenue Growth",
+      "Imputation Method - Volatility",
+      "Imputation Method - Innovation Score",
+      "Companies with Imputed R&D",
+      "Companies with Imputed Growth",
+      "Companies with Imputed Volatility",
+      "Companies with Imputed Innovation",
+      "Imputed Companies List",
+      "Imputation Flags Available",
+      "Imputation Date"
+    ),
+    Value = c(
+      "IMPORTANT: Some data points were estimated due to missing source data",
+      "Patent activity (log-normalized) → industry median → 1% default",
+      "Median of available revenue growth values",
+      "Median of available volatility values",
+      "Weighted average of quartiles (30% R&D, 30% Patents, 20% Growth, 20% Stability)",
+      as.character(rd_imputed_count),
+      as.character(growth_imputed_count),
+      as.character(volatility_imputed_count),
+      as.character(innovation_imputed_count),
+      imputed_companies_list,
+      "rd_imputed, growth_imputed, volatility_imputed, innovation_imputed",
+      as.character(Sys.Date())
+    ),
+    stringsAsFactors = FALSE
+  )
+  
+  # Combine base and imputation metadata
+  metadata <- bind_rows(metadata_base, metadata_imputation)
+  
+} else if(exists("portfolio_holdings") && "score_imputed" %in% names(portfolio_holdings) && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+  
+  # Fallback: Use portfolio_holdings imputation flags (legacy)
   imputed_companies <- portfolio_holdings %>%
     filter(score_imputed == TRUE) %>%
     arrange(ticker) %>%
@@ -2026,7 +2189,6 @@ if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm =
   
   imputed_companies_list <- paste(imputed_companies, collapse = ", ")
   
-  # Create imputation methodology text
   imputation_method <- paste(
     "For companies missing AI/innovation scores, the following imputation methodology was applied:",
     "1. Innovation Score: Estimated using patent activity (log-normalized) with baseline of 0.3",
@@ -2057,7 +2219,6 @@ if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm =
     stringsAsFactors = FALSE
   )
   
-  # Combine base and imputation metadata
   metadata <- bind_rows(metadata_base, metadata_imputation)
   
 } else {
@@ -2065,6 +2226,7 @@ if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm =
 }
 
 writeData(wb, "Metadata", metadata)
+cat("   ✅ Metadata sheet created with imputation documentation\n")
 
 # ============================================================================
 # NEW SHEETS: PERFORMANCE ATTRIBUTION (from Section 12)
