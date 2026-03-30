@@ -61,7 +61,7 @@ construct_ai_low_benchmark <- function(daii_scored, portfolio_weights, n_compone
 }
 
 # ============================================================================
-# PART 2: MATCHED-PAIR CONTROLS (SIMPLE ROBUST VERSION)
+# PART 2: MATCHED-PAIR CONTROLS (FINAL WORKING VERSION)
 # ============================================================================
 
 construct_matched_controls <- function(portfolio_companies, 
@@ -106,18 +106,34 @@ construct_matched_controls <- function(portfolio_companies,
   
   matches <- data.frame()
   skipped_count <- 0
+  error_count <- 0
   
   for(i in 1:nrow(portfolio_companies)) {
     
     portfolio_data <- portfolio_companies[i, ]
     
-    # Check for NA values in portfolio data
-    if(is.na(portfolio_data$market_cap) || portfolio_data$market_cap <= 0) {
-      skipped_count <- skipped_count + 1
-      next
-    }
+    # Safe check for market_cap - handle NA and non-numeric
+    market_cap_value <- tryCatch({
+      val <- portfolio_data$market_cap
+      if(is.null(val) || is.na(val) || !is.numeric(val) || val <= 0) {
+        NA
+      } else {
+        val
+      }
+    }, error = function(e) NA)
     
-    if(is.na(portfolio_data$revenue_growth)) {
+    # Safe check for revenue_growth
+    growth_value <- tryCatch({
+      val <- portfolio_data$revenue_growth
+      if(is.null(val) || is.na(val) || !is.numeric(val)) {
+        NA
+      } else {
+        val
+      }
+    }, error = function(e) NA)
+    
+    # Skip if either value is invalid
+    if(is.na(market_cap_value) || is.na(growth_value)) {
       skipped_count <- skipped_count + 1
       next
     }
@@ -128,8 +144,8 @@ construct_matched_controls <- function(portfolio_companies,
     # Calculate distance scores for this portfolio company
     controls <- controls %>%
       mutate(
-        size_distance = abs(log(market_cap) - log(portfolio_data$market_cap)) / mcap_sd,
-        growth_distance = abs(revenue_growth - portfolio_data$revenue_growth) / growth_sd,
+        size_distance = abs(log(market_cap) - log(market_cap_value)) / mcap_sd,
+        growth_distance = abs(revenue_growth - growth_value) / growth_sd,
         total_distance = size_distance + growth_distance
       )
     
@@ -150,20 +166,20 @@ construct_matched_controls <- function(portfolio_companies,
       control <- selected[1, ]
       
       matches <- rbind(matches, data.frame(
-        portfolio_ticker = portfolio_data$ticker,
-        portfolio_name = portfolio_data$company_name,
-        portfolio_ai_score = portfolio_data$ai_score,
-        portfolio_weight = portfolio_data$fund_weight,
-        portfolio_mcap = portfolio_data$market_cap,
-        portfolio_growth = portfolio_data$revenue_growth,
-        control_ticker = control$ticker,
-        control_name = control$company_name,
+        portfolio_ticker = as.character(portfolio_data$ticker),
+        portfolio_name = as.character(portfolio_data$company_name),
+        portfolio_ai_score = ifelse(is.null(portfolio_data$ai_score), NA, portfolio_data$ai_score),
+        portfolio_weight = ifelse(is.null(portfolio_data$fund_weight), 0, portfolio_data$fund_weight),
+        portfolio_mcap = market_cap_value,
+        portfolio_growth = growth_value,
+        control_ticker = as.character(control$ticker),
+        control_name = as.character(control$company_name),
         control_ai_score = control$ai_score,
         control_mcap = control$market_cap,
         control_growth = control$revenue_growth,
         ai_score_gap = portfolio_data$ai_score - control$ai_score,
-        size_ratio = portfolio_data$market_cap / control$market_cap,
-        growth_diff = portfolio_data$revenue_growth - control$revenue_growth,
+        size_ratio = market_cap_value / control$market_cap,
+        growth_diff = growth_value - control$revenue_growth,
         distance = control$total_distance,
         stringsAsFactors = FALSE
       ))
