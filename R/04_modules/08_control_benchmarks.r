@@ -106,8 +106,11 @@ construct_matched_controls <- function(portfolio_companies,
     
     portfolio_data <- portfolio_companies[i, ]
     
-    # Skip if portfolio company has missing market cap
+    # Skip if portfolio company has missing market cap or revenue growth
     if(is.na(portfolio_data$market_cap) || portfolio_data$market_cap <= 0) {
+      next
+    }
+    if(is.na(portfolio_data$revenue_growth)) {
       next
     }
     
