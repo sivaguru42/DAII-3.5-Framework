@@ -1927,11 +1927,12 @@ if(exists("portfolio_holdings") && nrow(portfolio_holdings) > 0) {
 }
 
 # -----------------------------------------------------------------------------
-# 6.8 Combined Excel Workbook (for sharing) - FIXED
+# 6.8 Combined Excel Workbook (for sharing) - FULLY INTEGRATED
 # -----------------------------------------------------------------------------
 cat("\n   Creating combined Excel workbook...\n")
 
 library(openxlsx)
+library(dplyr)
 
 # Ensure TRBC_Industry exists
 if(!"TRBC_Industry" %in% names(daii_scored)) {
@@ -1946,6 +1947,10 @@ if(!exists("discovery_only")) {
 
 # Create workbook
 wb <- createWorkbook()
+
+# ============================================================================
+# SHEETS 1-11: CORE SHEETS
+# ============================================================================
 
 # Sheet 1: Executive Summary
 addWorksheet(wb, "Summary")
@@ -2070,7 +2075,9 @@ performance_data <- data.frame(
 )
 writeData(wb, "Performance", performance_data)
 
-# Sheet 11: Metadata (Methodology & Definitions) - UPDATED with Imputation Info
+# ============================================================================
+# SHEET 11: METADATA (with Imputation Info) - FIXED TO USE daii_scored
+# ============================================================================
 addWorksheet(wb, "Metadata")
 
 # Base metadata
@@ -2095,14 +2102,10 @@ metadata_base <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# ============================================================================
-# IMPUTATION METADATA (from Innovation Scoring module)
-# ============================================================================
-
-# Check if daii_scored exists and has imputation flags
+# Imputation Metadata - NOW CORRECTLY USING daii_scored (primary data source)
 if(exists("daii_scored")) {
   
-  # Count imputed companies from innovation scoring
+  # Count imputed companies from innovation scoring (flags created in 01_innovation_scoring.r)
   rd_imputed_count <- if("rd_imputed" %in% names(daii_scored)) sum(daii_scored$rd_imputed, na.rm = TRUE) else 0
   growth_imputed_count <- if("growth_imputed" %in% names(daii_scored)) sum(daii_scored$growth_imputed, na.rm = TRUE) else 0
   volatility_imputed_count <- if("volatility_imputed" %in% names(daii_scored)) sum(daii_scored$volatility_imputed, na.rm = TRUE) else 0
@@ -2115,6 +2118,9 @@ if(exists("daii_scored")) {
       arrange(ticker) %>%
       pull(ticker)
     imputed_companies_list <- paste(imputed_companies, collapse = ", ")
+    if(nchar(imputed_companies_list) > 32000) {
+      imputed_companies_list <- paste0(substr(imputed_companies_list, 1, 32000), "... (truncated)")
+    }
   } else {
     imputed_companies_list <- "None"
   }
@@ -2135,7 +2141,7 @@ if(exists("daii_scored")) {
     "   - Median of available values",
     "",
     "4. Innovation Score:",
-    "   - Weighted average of quartiles (may include imputed components)",
+    "   - Weighted average of quartiles (30% R&D, 30% Patents, 20% Growth, 20% Stability)",
     "   - Default 0.5 if all components missing",
     "",
     "Companies with imputed scores have corresponding flags (rd_imputed, growth_imputed,",
@@ -2176,49 +2182,6 @@ if(exists("daii_scored")) {
     stringsAsFactors = FALSE
   )
   
-  # Combine base and imputation metadata
-  metadata <- bind_rows(metadata_base, metadata_imputation)
-  
-} else if(exists("portfolio_holdings") && "score_imputed" %in% names(portfolio_holdings) && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
-  
-  # Fallback: Use portfolio_holdings imputation flags (legacy)
-  imputed_companies <- portfolio_holdings %>%
-    filter(score_imputed == TRUE) %>%
-    arrange(ticker) %>%
-    pull(ticker)
-  
-  imputed_companies_list <- paste(imputed_companies, collapse = ", ")
-  
-  imputation_method <- paste(
-    "For companies missing AI/innovation scores, the following imputation methodology was applied:",
-    "1. Innovation Score: Estimated using patent activity (log-normalized) with baseline of 0.3",
-    "2. AI Score: Estimated using patent activity or revenue growth, with baseline of 0.25",
-    "3. AI Label: Assigned based on imputed AI score thresholds",
-    "4. Growth & Volatility: Default values (0% growth, 0.5 volatility) where missing",
-    "",
-    "Companies with imputed scores are flagged in the data for transparency.",
-    "These estimates should be considered directional and validated with fundamental research.",
-    sep = "\n"
-  )
-  
-  metadata_imputation <- data.frame(
-    Field = c(
-      "⚠️ AI Score Imputation Note",
-      "Imputed Companies Count",
-      "Imputed Companies List",
-      "Imputation Methodology",
-      "Imputation Date"
-    ),
-    Value = c(
-      "IMPORTANT: AI scores for some companies were estimated due to missing data",
-      as.character(sum(portfolio_holdings$score_imputed, na.rm = TRUE)),
-      imputed_companies_list,
-      imputation_method,
-      as.character(Sys.Date())
-    ),
-    stringsAsFactors = FALSE
-  )
-  
   metadata <- bind_rows(metadata_base, metadata_imputation)
   
 } else {
@@ -2229,28 +2192,36 @@ writeData(wb, "Metadata", metadata)
 cat("   ✅ Metadata sheet created with imputation documentation\n")
 
 # ============================================================================
-# NEW SHEETS: PERFORMANCE ATTRIBUTION (from Section 12)
+# SHEETS 12-15: PERFORMANCE ATTRIBUTION & PORTFOLIO CONCENTRATION
 # ============================================================================
 
 # Sheet 12: Performance Attribution (Daily Data)
-if(exists("attribution_results") && !is.null(attribution_results)) {
+if(exists("attribution_results") && !is.null(attribution_results) && 
+   !is.null(attribution_results$attribution) && nrow(attribution_results$attribution) > 0) {
   addWorksheet(wb, "Performance Attribution")
   writeData(wb, "Performance Attribution", attribution_results$attribution)
   cat("   ✅ Added Performance Attribution sheet\n")
+} else {
+  cat("   ℹ️ No attribution_results$attribution data available\n")
 }
 
 # Sheet 13: Attribution Metrics (Summary)
-if(exists("attribution_results") && !is.null(attribution_results)) {
+if(exists("attribution_results") && !is.null(attribution_results) && 
+   !is.null(attribution_results$summary) && nrow(attribution_results$summary) > 0) {
   addWorksheet(wb, "Attribution Metrics")
   writeData(wb, "Attribution Metrics", attribution_results$summary)
   cat("   ✅ Added Attribution Metrics sheet\n")
+} else {
+  cat("   ℹ️ No attribution_results$summary data available\n")
 }
 
 # Sheet 14: Benchmark Comparison
-if(exists("benchmark_comparison") && !is.null(benchmark_comparison)) {
+if(exists("benchmark_comparison") && !is.null(benchmark_comparison) && nrow(benchmark_comparison) > 0) {
   addWorksheet(wb, "Benchmark Comparison")
   writeData(wb, "Benchmark Comparison", benchmark_comparison)
   cat("   ✅ Added Benchmark Comparison sheet\n")
+} else {
+  cat("   ℹ️ No benchmark_comparison data available\n")
 }
 
 # Sheet 15: Portfolio Concentration
@@ -2268,57 +2239,43 @@ if(exists("portfolio_holdings") && nrow(portfolio_holdings) > 0) {
   
   writeData(wb, "Portfolio Concentration", concentration_data)
   cat("   ✅ Added Portfolio Concentration sheet\n")
+} else {
+  cat("   ℹ️ No portfolio_holdings data available\n")
 }
 
 # ============================================================================
-# NEW SHEETS: BENCHMARK AI EXPOSURE (from Section 10.7)
+# SHEETS 16-19: BENCHMARK AI EXPOSURE (from Section 10.7)
 # ============================================================================
 
 # Sheet 16: Benchmark AI Exposure Comparison
-if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison)) {
+if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison) && nrow(ai_exposure_comparison) > 0) {
   addWorksheet(wb, "Benchmark AI Exposure")
-  
-  # Format for readability
-  exposure_table <- ai_exposure_comparison %>%
-    mutate(
-      weighted_ai_score = round(weighted_ai_score, 3),
-      pct_ai_leaders = round(pct_ai_leaders, 1),
-      pct_ai_adopters = round(pct_ai_adopters, 1),
-      pct_ai_followers = round(pct_ai_followers, 1),
-      pct_ai_laggards = round(pct_ai_laggards, 1),
-      active_share_pct = round(active_share * 100, 1),
-      ai_score_gap = round(ai_score_gap, 3),
-      leader_gap = round(leader_gap, 1)
-    )
-  
-  writeData(wb, "Benchmark AI Exposure", exposure_table)
+  writeData(wb, "Benchmark AI Exposure", ai_exposure_comparison)
   cat("   ✅ Added Benchmark AI Exposure sheet\n")
+} else {
+  cat("   ℹ️ No ai_exposure_comparison data available\n")
 }
 
 # Sheet 17: S&P 500 AI Exposure by Sector
-if(exists("sp500_sector_ai") && !is.null(sp500_sector_ai)) {
+if(exists("sp500_sector_ai") && !is.null(sp500_sector_ai) && nrow(sp500_sector_ai) > 0) {
   addWorksheet(wb, "S&P 500 AI by Sector")
-  
-  sector_table <- sp500_sector_ai %>%
-    mutate(
-      weighted_ai = round(weighted_ai, 3),
-      pct_ai_leaders = round(pct_ai_leaders, 1),
-      avg_revenue_growth = round(avg_revenue_growth * 100, 1)
-    )
-  
-  writeData(wb, "S&P 500 AI by Sector", sector_table)
+  writeData(wb, "S&P 500 AI by Sector", sp500_sector_ai)
   cat("   ✅ Added S&P 500 AI by Sector sheet\n")
+} else {
+  cat("   ℹ️ No sp500_sector_ai data available\n")
 }
 
 # Sheet 18: AI Exposure Radar Data
-if(exists("radar_data") && !is.null(radar_data)) {
+if(exists("radar_data") && !is.null(radar_data) && nrow(radar_data) > 0) {
   addWorksheet(wb, "AI Exposure Radar")
   writeData(wb, "AI Exposure Radar", radar_data)
   cat("   ✅ Added AI Exposure Radar sheet\n")
+} else {
+  cat("   ℹ️ No radar_data available\n")
 }
 
 # Sheet 19: AI Exposure Summary (Formatted)
-if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison)) {
+if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison) && nrow(ai_exposure_comparison) > 0) {
   addWorksheet(wb, "AI Exposure Summary")
   
   summary_table <- ai_exposure_comparison %>%
@@ -2330,31 +2287,88 @@ if(exists("ai_exposure_comparison") && !is.null(ai_exposure_comparison)) {
       pct_ai_leaders = round(pct_ai_leaders, 1),
       pct_ai_adopters = round(pct_ai_adopters, 1),
       pct_ai_followers = round(pct_ai_followers, 1),
-      pct_ai_laggards = round(pct_ai_laggards, 1),
-      `AI Score Rank` = rank(-weighted_ai_score),
-      `Leaders Rank` = rank(-pct_ai_leaders)
+      pct_ai_laggards = round(pct_ai_laggards, 1)
     ) %>%
     select(-active_share)
   
   writeData(wb, "AI Exposure Summary", summary_table)
   cat("   ✅ Added AI Exposure Summary sheet\n")
+} else {
+  cat("   ℹ️ No ai_exposure_comparison data for AI Exposure Summary\n")
 }
 
 # ============================================================================
-# END OF NEW SHEETS
+# SHEETS 20-22: CONTROL BENCHMARK ANALYSIS (from Section 10.8)
 # ============================================================================
 
-# Apply formatting (with safety check for empty sheets)
+# Sheet 20: AI-Low Benchmark Constituents
+if(exists("ai_low_benchmark") && !is.null(ai_low_benchmark) && nrow(ai_low_benchmark) > 0) {
+  addWorksheet(wb, "AI-Low Benchmark")
+  writeData(wb, "AI-Low Benchmark", ai_low_benchmark)
+  cat("   ✅ Added AI-Low Benchmark sheet\n")
+} else {
+  cat("   ℹ️ No ai_low_benchmark data available\n")
+}
+
+# Sheet 21: Matched-Pair Controls
+if(exists("matched_controls") && !is.null(matched_controls)) {
+  addWorksheet(wb, "Matched-Pair Controls")
+  if(is.list(matched_controls) && "pairs" %in% names(matched_controls)) {
+    if(nrow(matched_controls$pairs) > 0) {
+      writeData(wb, "Matched-Pair Controls", matched_controls$pairs)
+      cat("   ✅ Added Matched-Pair Controls sheet\n")
+    } else {
+      writeData(wb, "Matched-Pair Controls", data.frame(Note = "No matched pairs found"))
+      cat("   ℹ️ No matched pairs found\n")
+    }
+  } else if(is.data.frame(matched_controls) && nrow(matched_controls) > 0) {
+    writeData(wb, "Matched-Pair Controls", matched_controls)
+    cat("   ✅ Added Matched-Pair Controls sheet\n")
+  } else {
+    writeData(wb, "Matched-Pair Controls", data.frame(Note = "No matched controls data available"))
+    cat("   ℹ️ No matched controls data available\n")
+  }
+} else {
+  cat("   ℹ️ No matched_controls data available\n")
+}
+
+# Sheet 22: Power Analysis
+if(exists("portfolio_power") && !is.null(portfolio_power)) {
+  addWorksheet(wb, "Power Analysis")
+  power_data <- data.frame(
+    Metric = names(portfolio_power),
+    Value = as.character(unlist(portfolio_power)),
+    stringsAsFactors = FALSE
+  )
+  writeData(wb, "Power Analysis", power_data)
+  cat("   ✅ Added Power Analysis sheet\n")
+} else if(exists("universal_panel") && !is.null(universal_panel)) {
+  # Fallback: create basic power analysis from universal panel
+  addWorksheet(wb, "Power Analysis")
+  power_data <- data.frame(
+    Metric = c("Universal Panel Size", "Control Pool Available"),
+    Value = c(nrow(universal_panel), "Yes"),
+    stringsAsFactors = FALSE
+  )
+  writeData(wb, "Power Analysis", power_data)
+  cat("   ✅ Added Power Analysis sheet (basic)\n")
+} else {
+  cat("   ℹ️ No portfolio_power or universal_panel data available\n")
+}
+
+# ============================================================================
+# APPLY FORMATTING & SAVE
+# ============================================================================
+
+# Apply formatting
 header_style <- createStyle(fontSize = 12, fontColour = "#FFFFFF", 
                             halign = "center", fgFill = "#2C3E50", textDecoration = "bold")
 
 for(sheet in names(wb)) {
-  # Get the data from the sheet to check dimensions
   sheet_data <- wb[[sheet]]
   if(!is.null(sheet_data) && ncol(sheet_data) > 0 && nrow(sheet_data) > 0) {
     addStyle(wb, sheet, header_style, rows = 1, cols = 1:ncol(sheet_data), gridExpand = TRUE)
     freezePane(wb, sheet, firstRow = TRUE)
-    # Auto-size columns for better readability
     setColWidths(wb, sheet, cols = 1:ncol(sheet_data), widths = "auto")
   }
 }
@@ -2363,17 +2377,18 @@ for(sheet in names(wb)) {
 excel_file <- file.path(run_dir, paste0(run_timestamp, "_00_complete_report.xlsx"))
 saveWorkbook(wb, excel_file, overwrite = TRUE)
 
-cat("\n   ✅ Excel workbook saved: ", basename(excel_file), "\n")
+cat("   ✅ Excel workbook saved: ", basename(excel_file), "\n")
 cat("   📊 Workbook contains", length(names(wb)), "sheets\n")
 
 # -----------------------------------------------------------------------------
-# 6.9 Summary Report - UPDATED with Imputation Warning
+# 6.9 Summary Report - UPDATED with Imputation Warning (using daii_scored)
 # -----------------------------------------------------------------------------
 cat("\n📊 GENERATING SUMMARY REPORT\n")
 
 # Calculate additional metrics for summary
 attribution_summary <- ""
-if(exists("attribution_results") && !is.null(attribution_results)) {
+if(exists("attribution_results") && !is.null(attribution_results) && 
+   !is.null(attribution_results$metrics)) {
   attribution_summary <- paste(
     "\n## 📈 PERFORMANCE ATTRIBUTION\n",
     sprintf("- Total Return: %.2f%%\n", attribution_results$metrics$total_return * 100),
@@ -2417,28 +2432,51 @@ if(exists("portfolio_holdings") && nrow(portfolio_holdings) > 0) {
   portfolio_concentration <- sprintf("- Top 3 Holdings Concentration: %.1f%%\n", top_3_weight * 100)
 }
 
-# Imputation warning section
+# Imputation warning section - NOW USING daii_scored (primary data source)
 imputation_warning <- ""
-if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
+if(exists("daii_scored") && "innovation_imputed" %in% names(daii_scored)) {
   
-  imputed_count <- sum(portfolio_holdings$score_imputed, na.rm = TRUE)
-  imputed_list <- portfolio_holdings %>%
-    filter(score_imputed == TRUE) %>%
-    arrange(ticker) %>%
-    pull(ticker)
+  imputed_count <- sum(daii_scored$innovation_imputed, na.rm = TRUE)
   
-  imputation_warning <- paste(
-    "\n## ⚠️ DATA QUALITY NOTE - IMPUTED SCORES\n",
-    sprintf("**%d portfolio companies** had missing AI/innovation scores and were imputed:\n", imputed_count),
-    paste("  -", paste(imputed_list, collapse = ", "), "\n"),
-    "\n**Imputation Methodology:**\n",
-    "  - Innovation Score: Estimated using patent activity (log-normalized) with baseline of 0.3\n",
-    "  - AI Score: Estimated using patent activity or revenue growth, with baseline of 0.25\n",
-    "  - AI Label: Assigned based on imputed AI score thresholds\n",
-    "  - Growth & Volatility: Default values (0% growth, 0.5 volatility) where missing\n",
-    "\n*These estimates should be considered directional. See Metadata sheet for full methodology.*\n",
+  if(imputed_count > 0) {
+    imputed_list <- daii_scored %>%
+      filter(innovation_imputed == TRUE) %>%
+      arrange(ticker) %>%
+      pull(ticker)
+    
+    imputation_warning <- paste(
+      "\n## ⚠️ DATA QUALITY NOTE - IMPUTED SCORES\n",
+      sprintf("**%d companies** had missing data and were imputed:\n", imputed_count),
+      paste("  -", paste(imputed_list, collapse = ", "), "\n"),
+      "\n**Imputation Methodology:**\n",
+      "  - R&D Intensity: Estimated from patent activity (log-normalized) → industry median → 1% default\n",
+      "  - Revenue Growth: Median of available values\n",
+      "  - Volatility: Median of available values\n",
+      "  - Innovation Score: Weighted average of quartiles (30% R&D, 30% Patents, 20% Growth, 20% Stability)\n",
+      "\n*These estimates should be considered directional. See Metadata sheet for full methodology.*\n",
+      sep = ""
+    )
+  }
+}
+
+# Control benchmark summary
+control_summary <- ""
+if(exists("ai_low_benchmark") && !is.null(ai_low_benchmark) && nrow(ai_low_benchmark) > 0) {
+  control_summary <- paste(
+    "\n## 🎯 CONTROL BENCHMARKS\n",
+    sprintf("- AI-Low Benchmark Size: %d companies\n", nrow(ai_low_benchmark)),
     sep = ""
   )
+  
+  if(exists("matched_controls") && !is.null(matched_controls)) {
+    if(is.list(matched_controls) && "pairs" %in% names(matched_controls)) {
+      control_summary <- paste0(control_summary, 
+                                sprintf("- Matched Pairs Created: %d\n", nrow(matched_controls$pairs)))
+    } else if(is.data.frame(matched_controls) && nrow(matched_controls) > 0) {
+      control_summary <- paste0(control_summary, 
+                                sprintf("- Matched Pairs Created: %d\n", nrow(matched_controls)))
+    }
+  }
 }
 
 # Build the complete summary report
@@ -2455,6 +2493,7 @@ summary_report <- paste(
   portfolio_concentration,
   attribution_summary,
   benchmark_ai_summary,
+  control_summary,
   imputation_warning,
   "\n## 📁 OUTPUT FILES\n",
   paste(sprintf("- %s", list.files(run_dir)), collapse = "\n"),
@@ -2462,7 +2501,7 @@ summary_report <- paste(
   sprintf("- Run Date: %s\n", run_timestamp),
   sprintf("- Pipeline Version: 5.3 FINAL\n"),
   sprintf("- Companies in Portfolio: %d\n", sum(daii_scored$in_portfolio, na.rm = TRUE)),
-  sprintf("- Excel Sheets: %d\n", ifelse(exists("wb"), length(names(wb)), 0)),
+  sprintf("- Excel Sheets: %d\n", length(names(wb))),
   sep = ""
 )
 
@@ -2471,10 +2510,12 @@ writeLines(summary_report, file.path(run_dir, "README.md"))
 cat("\n✅✅✅ ALL OUTPUTS GENERATED SUCCESSFULLY\n")
 cat("   Run directory:", run_dir, "\n")
 cat("   Output files:", length(list.files(run_dir)), "\n")
-if(exists("portfolio_holdings") && sum(portfolio_holdings$score_imputed, na.rm = TRUE) > 0) {
-  cat("   ⚠️ Note:", sum(portfolio_holdings$score_imputed, na.rm = TRUE), 
-      "portfolio companies had imputed AI scores\n")
-  cat("      See Metadata sheet or README.md for details\n")
+if(exists("daii_scored") && "innovation_imputed" %in% names(daii_scored)) {
+  imputed_count <- sum(daii_scored$innovation_imputed, na.rm = TRUE)
+  if(imputed_count > 0) {
+    cat("   ⚠️ Note:", imputed_count, "companies had imputed data\n")
+    cat("      See Metadata sheet or README.md for details\n")
+  }
 }
 cat("🏁 PIPELINE EXECUTION COMPLETE\n")
 cat(paste(rep("=", 80), collapse = ""), "\n")
