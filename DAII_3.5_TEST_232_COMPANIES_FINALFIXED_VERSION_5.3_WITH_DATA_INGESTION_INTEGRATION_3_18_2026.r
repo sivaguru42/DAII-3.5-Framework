@@ -1459,76 +1459,8 @@ if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(dai
       
       cat("\n   ✅ Performance attribution complete\n")
       
-      # ============================================================================
-      # ADD ATTRIBUTION SHEETS TO EXCEL WORKBOOK
-      # ============================================================================
-      # Load the existing workbook
-      excel_file <- file.path(run_dir, paste0(run_timestamp, "_00_complete_report.xlsx"))
-      
-      if(file.exists(excel_file)) {
-        # Load the workbook
-        wb <- loadWorkbook(excel_file)
-        
-        # Sheet 12: Performance Attribution (Daily Data)
-        addWorksheet(wb, "Performance Attribution")
-        writeData(wb, "Performance Attribution", attribution_results$attribution)
-        
-        # Sheet 13: Attribution Metrics (Summary)
-        addWorksheet(wb, "Attribution Metrics")
-        writeData(wb, "Attribution Metrics", attribution_results$summary)
-        
-        # Sheet 14: Benchmark Comparison
-        addWorksheet(wb, "Benchmark Comparison")
-        writeData(wb, "Benchmark Comparison", benchmark_comparison)
-        
-        # Sheet 15: Portfolio Concentration
-        addWorksheet(wb, "Portfolio Concentration")
-        
-        # Calculate portfolio concentration
-        portfolio_holdings <- snapshot %>%
-          left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
-          filter(in_portfolio == TRUE) %>%
-          arrange(desc(fund_weight)) %>%
-          mutate(
-            cumulative_weight = cumsum(fund_weight),
-            rank = row_number()
-          ) %>%
-          select(rank, ticker, company_name, total_net_exposure_usd, fund_weight, cumulative_weight, ai_label)
-        
-        writeData(wb, "Portfolio Concentration", portfolio_holdings)
-        
-        # Format all new sheets
-        header_style <- createStyle(fontSize = 12, fontColour = "#FFFFFF", 
-                                    halign = "center", fgFill = "#2C3E50", textDecoration = "bold")
-        
-        new_sheets <- c("Performance Attribution", "Attribution Metrics", 
-                        "Benchmark Comparison", "Portfolio Concentration")
-        
-        for(sheet_name in new_sheets) {
-          # Get data dimensions
-          sheet_data <- wb[[sheet_name]]
-          if(!is.null(sheet_data) && ncol(sheet_data) > 0 && nrow(sheet_data) > 0) {
-            addStyle(wb, sheet_name, header_style, rows = 1, cols = 1:ncol(sheet_data), gridExpand = TRUE)
-            freezePane(wb, sheet_name, firstRow = TRUE)
-            setColWidths(wb, sheet_name, cols = 1:ncol(sheet_data), widths = "auto")
-          }
-        }
-        
-        # Save the updated workbook
-        saveWorkbook(wb, excel_file, overwrite = TRUE)
-        cat("   ✅ Updated Excel workbook with performance attribution sheets\n")
-        
-        # Print summary of new sheets
-        cat("\n   📊 New sheets added:\n")
-        cat("      - Performance Attribution: Daily portfolio vs benchmark returns\n")
-        cat("      - Attribution Metrics: Alpha, Beta, Sharpe, Information Ratio\n")
-        cat("      - Benchmark Comparison: Portfolio vs S&P 500, NASDAQ 100\n")
-        cat("      - Portfolio Concentration: Top holdings with cumulative weight\n")
-        
-      } else {
-        cat("   ⚠️ Excel workbook not found, attribution sheets not added\n")
-      }
-      # ============================================================================
+      # NOTE: Sheets are now added in Section 6.8, not here
+      cat("   ℹ️ Attribution sheets will be added in Section 6.8\n")
       
     } else {
       cat("   ⚠️ Insufficient data for attribution calculation\n")
@@ -1550,7 +1482,63 @@ if("as_of_date" %in% names(daily_ratios) && "price_1d_pct_change" %in% names(dai
   cat("      Available columns:", paste(names(daily_ratios)[1:10], collapse=", "), "...\n")
 }
 
+# Store results for Section 6.8 to use
+assign("attribution_results", attribution_results, envir = .GlobalEnv)
+assign("benchmark_comparison", benchmark_comparison, envir = .GlobalEnv)
+
 cat("\n   ✅ Performance attribution section complete\n")
+
+# ============================================================================
+# ENSURE PORTFOLIO_HOLDINGS IS AVAILABLE FOR SECTION 6.8
+# ============================================================================
+
+# Check if portfolio_holdings exists and has required columns
+if(!exists("portfolio_holdings")) {
+  cat("\n   ℹ️ portfolio_holdings not found. Creating from snapshot and holdings_lookup...\n")
+  
+  if(exists("snapshot") && exists("holdings_lookup")) {
+    portfolio_holdings <- snapshot %>%
+      left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+      filter(in_portfolio == TRUE) %>%
+      select(ticker, company_name, fund_weight, ai_label)
+    
+    assign("portfolio_holdings", portfolio_holdings, envir = .GlobalEnv)
+    cat(sprintf("   ✅ Created portfolio_holdings with %d companies\n", nrow(portfolio_holdings)))
+  } else {
+    cat("   ⚠️ Cannot create portfolio_holdings: snapshot or holdings_lookup missing\n")
+  }
+  
+} else {
+  # Verify it has the needed columns for Sheet 15
+  required_cols <- c("ticker", "company_name", "fund_weight", "ai_label")
+  missing_cols <- required_cols[!required_cols %in% names(portfolio_holdings)]
+  
+  if(length(missing_cols) > 0) {
+    cat("\n   ⚠️ portfolio_holdings exists but missing columns:", 
+        paste(missing_cols, collapse = ", "), "\n")
+    cat("   Attempting to recreate from snapshot and holdings_lookup...\n")
+    
+    if(exists("snapshot") && exists("holdings_lookup")) {
+      portfolio_holdings <- snapshot %>%
+        left_join(holdings_lookup, by = c("ticker" = "Ticker")) %>%
+        filter(in_portfolio == TRUE) %>%
+        select(ticker, company_name, fund_weight, ai_label)
+      
+      assign("portfolio_holdings", portfolio_holdings, envir = .GlobalEnv)
+      cat(sprintf("   ✅ Recreated portfolio_holdings with %d companies\n", nrow(portfolio_holdings)))
+    } else {
+      cat("   ⚠️ Cannot recreate: snapshot or holdings_lookup missing\n")
+    }
+  } else {
+    cat(sprintf("\n   ✅ portfolio_holdings verified: %d companies, columns: %s\n", 
+                nrow(portfolio_holdings), 
+                paste(names(portfolio_holdings), collapse = ", ")))
+  }
+}
+
+# =============================================================================
+# SECTION 10.9: UNIVERSAL CONTROL PANEL
+# =============================================================================
 
 # =============================================================================
 # SECTION 10.9: UNIVERSAL CONTROL PANEL
