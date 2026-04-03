@@ -1,11 +1,13 @@
 ---
-title: "DAII 3.5 AI Investment Dashboard"
+title: "🤖 DAII 3.5 AI Investment Dashboard"
 output: 
   flexdashboard::flex_dashboard:
     orientation: rows
-    theme: flatly
+    theme: 
+      version: 4
+      bootswatch: flatly
     vertical_layout: fill
-runtime: shiny
+    source_code: embed
 ---
 
 ```{r setup, include=FALSE}
@@ -70,7 +72,15 @@ total_companies <- nrow(features)
 ai_leaders <- sum(features$ai_label == "AI Leader", na.rm = TRUE)
 unicorn_count <- if(!is.null(unicorns)) nrow(unicorns) else 0
 anomaly_count <- if(!is.null(anomaly_scores)) sum(anomaly_scores$is_anomaly, na.rm = TRUE) else sum(features$is_anomaly, na.rm = TRUE)
-```r
+
+# Custom color palette
+ai_colors <- c(
+  "AI Leader" = "#00B4D8",
+  "AI Adopter" = "#48CAE4", 
+  "AI Follower" = "#90E0EF",
+  "AI Laggard" = "#CAF0F8"
+)
+
 # Recalculation function for custom weights
 current_weights <- reactiveValues(
   rd = 0.30,
@@ -103,62 +113,221 @@ recalculate_scores <- function(data, weights) {
       )
     )
 }
+
+# --- Reactive Observers for Weight Adjustments ---
+
+output$weight_display <- renderText({
+  paste0("R&D: ", current_weights$rd * 100, "%\n",
+         "Patent: ", current_weights$patent * 100, "%\n",
+         "Growth: ", current_weights$growth * 100, "%\n",
+         "Stability: ", current_weights$stability * 100, "%\n",
+         "────────────────\n",
+         "Total: ", (current_weights$rd + current_weights$patent + 
+                     current_weights$growth + current_weights$stability) * 100, "%")
+})
+
+observeEvent(input$apply_weights, {
+  current_weights$rd <- input$weight_rd
+  current_weights$patent <- input$weight_patent
+  current_weights$growth <- input$weight_growth
+  current_weights$stability <- input$weight_stability
+
+  if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+    features_custom <- recalculate_scores(features, current_weights)
+    top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
+
+    output$ai_leaders_chart <- renderPlotly({
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders (Custom Weights)", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+    })
+
+    output$ai_leaders_table <- renderDT({
+      top_ai_leaders_custom %>% select(ticker, company_name, ai_score_custom, innovation_score_custom, ai_label_custom) %>% mutate(ai_score_custom = round(ai_score_custom, 3), innovation_score_custom = round(innovation_score_custom, 3)) %>% datatable(colnames = c("Ticker", "Company", "AI Score", "Innovation", "Label"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+    })
+  } else {
+    cat("⚠️ AI leader data not available.\n")
+  }
+})
+
+observeEvent(input$reset_weights, {
+  updateSliderInput(session, "weight_rd", value = 0.30)
+  updateSliderInput(session, "weight_patent", value = 0.30)
+  updateSliderInput(session, "weight_growth", value = 0.20)
+  updateSliderInput(session, "weight_stability", value = 0.20)
+
+  current_weights$rd <- 0.30
+  current_weights$patent <- 0.30
+  current_weights$growth <- 0.20
+  current_weights$stability <- 0.20
+
+  if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+    features_custom <- recalculate_scores(features, current_weights)
+    top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
+
+    output$ai_leaders_chart <- renderPlotly({
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+    })
+
+    output$ai_leaders_table <- renderDT({
+      top_ai_leaders_custom %>% select(ticker, company_name, ai_score_custom, innovation_score_custom, ai_label_custom) %>% mutate(ai_score_custom = round(ai_score_custom, 3), innovation_score_custom = round(innovation_score_custom, 3)) %>% datatable(colnames = c("Ticker", "Company", "AI Score", "Innovation", "Label"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+    })
+  } else {
+    cat("⚠️ AI leader data not available.\n")
+  }
+})
+
+if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+  output$ai_leaders_chart <- renderPlotly({
+    plot_ly(data = top_ai_leaders, x = ~reorder(company_name, ai_score), y = ~ai_score, type = "bar",
+            marker = list(
+              color = ~ai_score,
+              colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+              line = list(color = "white", width = 1)
+            ),
+            text = ~paste("AI Score:", round(ai_score, 3)), hoverinfo = "text") %>%
+      layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+  })
+} else {
+  cat("⚠️ AI leader data not available.\n")
+}
 ```
+
+```{css, echo=FALSE}
+/* Modern professional styling */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+body, .main-container {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Value box hover effect */
+.value-box {
+  border-radius: 16px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.value-box:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12) !important;
+}
+
+/* Sidebar gradient */
+.sidebar {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+  color: #e0e0e0 !important;
+}
+
+.sidebar h1, .sidebar h2, .sidebar h3, .sidebar h4 {
+  color: #00B4D8 !important;
+}
+
+/* Button styling */
+.btn-primary {
+  background: linear-gradient(135deg, #00B4D8 0%, #0077B6 100%) !important;
+  border: none !important;
+  border-radius: 40px !important;
+}
+
+/* Tab styling */
+.nav-tabs > li > a {
+  border-radius: 40px 40px 0 0 !important;
+  font-weight: 600 !important;
+}
+
+.nav-tabs > li.active > a {
+  background: linear-gradient(135deg, #00B4D8 0%, #0077B6 100%) !important;
+  color: white !important;
+}
+
+/* DataTable header */
+.dataTable thead th {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+  color: white !important;
+}
+
+/* Panel styling */
+.panel {
+  border-radius: 16px !important;
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+}
+```
+
 Sidebar {.sidebar}
 =======================================================================
 
-### 🎯 AI Score Weighting Adjustments
+### 🎯 AI Score Weighting
 
-Adjust the weights to see how AI scores change. Default weights are R&D=30%, Patents=30%, Growth=20%, Stability=20%.
+Adjust weights to discover how AI scores change. Default: R&D=30%, Patents=30%, Growth=20%, Stability=20%.
 
 ```{r}
-sliderInput("weight_rd", "R&D Intensity Weight:", 
+sliderInput("weight_rd", "🧪 R&D Intensity Weight:", 
             min = 0, max = 0.5, value = 0.30, step = 0.05)
 
-sliderInput("weight_patent", "Patent Activity Weight:", 
+sliderInput("weight_patent", "📜 Patent Activity Weight:", 
             min = 0, max = 0.5, value = 0.30, step = 0.05)
 
-sliderInput("weight_growth", "Revenue Growth Weight:", 
+sliderInput("weight_growth", "📈 Revenue Growth Weight:", 
             min = 0, max = 0.5, value = 0.20, step = 0.05)
 
-sliderInput("weight_stability", "Stability Weight:", 
+sliderInput("weight_stability", "🛡️ Stability Weight:", 
             min = 0, max = 0.5, value = 0.20, step = 0.05)
 
-actionButton("apply_weights", "Apply Custom Weights", class = "btn-primary")
-actionButton("reset_weights", "Reset to Default", class = "btn-default")
+actionButton("apply_weights", "✨ Apply Custom Weights", class = "btn-primary")
+actionButton("reset_weights", "⟳ Reset to Default", class = "btn-default")
 
 hr()
 
-h4("Current Weights in Use"),
+h4("📊 Current Weights in Use")
 verbatimTextOutput("weight_display")
 
 hr()
 
-h4("Patent Quality Flag"),
-p("Companies with suspicious patent counts are flagged for manual review."),
-p(strong("Highly Suspicious:"), " >100,000 patents (likely inflated)"),
-p(strong("Suspicious:"), " 50,000-100,000 patents"),
-p(strong("OK:"), " <50,000 patents")
+h4("🚨 Patent Quality Flag")
+p("Companies with suspicious patent counts:")
+p(strong("⚠️ Highly Suspicious:"), " >100,000 patents")
+p(strong("⚠️ Suspicious:"), " 50,000-100,000 patents") 
+p(strong("✅ OK:"), " <50,000 patents")
+
+hr()
+
+h4("💡 Pro Tip")
+p("Try increasing Growth weight to 0.40 to find 🦄 unicorn candidates!")
+```
 
 KPI Row
 =======================================================================
 
-### Total Companies
+### 🏢 Total Companies
 ```{r}
 valueBox(total_companies, icon = "fa-building", color = "primary")
 ```
 
-### AI Leaders
+### 🤖 AI Leaders
 ```{r}
 valueBox(ai_leaders, icon = "fa-star", color = "success")
 ```
 
-### Unicorn Candidates
+### 🦄 Unicorn Candidates
 ```{r}
 valueBox(unicorn_count, icon = "fa-unicorn", color = "warning")
 ```
 
-### Anomalies Detected
+### ⚠️ Anomalies Detected
 ```{r}
 valueBox(anomaly_count, icon = "fa-exclamation-triangle", color = "danger")
 ```
@@ -176,6 +345,7 @@ output$weight_display <- renderText({
          "Patent: ", current_weights$patent * 100, "%\n",
          "Growth: ", current_weights$growth * 100, "%\n",
          "Stability: ", current_weights$stability * 100, "%\n",
+         "────────────────\n",
          "Total: ", (current_weights$rd + current_weights$patent + 
                      current_weights$growth + current_weights$stability) * 100, "%")
 })
@@ -191,7 +361,14 @@ observeEvent(input$apply_weights, {
     top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
     
     output$ai_leaders_chart <- renderPlotly({
-      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar", marker = list(color = "#2c3e50"), text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>% layout(title = "Top 20 AI Leaders (Custom Weights)", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders (Custom Weights)", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
     })
     
     output$ai_leaders_table <- renderDT({
@@ -218,7 +395,14 @@ observeEvent(input$reset_weights, {
     top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
     
     output$ai_leaders_chart <- renderPlotly({
-      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar", marker = list(color = "#2c3e50"), text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>% layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
     })
     
     output$ai_leaders_table <- renderDT({
@@ -231,7 +415,14 @@ observeEvent(input$reset_weights, {
 
 if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
   output$ai_leaders_chart <- renderPlotly({
-    plot_ly(data = top_ai_leaders, x = ~reorder(company_name, ai_score), y = ~ai_score, type = "bar", marker = list(color = "#2c3e50"), text = ~paste("AI Score:", round(ai_score, 3)), hoverinfo = "text") %>% layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+    plot_ly(data = top_ai_leaders, x = ~reorder(company_name, ai_score), y = ~ai_score, type = "bar",
+            marker = list(
+              color = ~ai_score,
+              colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+              line = list(color = "white", width = 1)
+            ),
+            text = ~paste("AI Score:", round(ai_score, 3)), hoverinfo = "text") %>%
+      layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
   })
 } else {
   cat("⚠️ AI leader data not available.\n")
@@ -240,7 +431,16 @@ if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders)
 
 ### AI Score Distribution
 ```{r}
-plot_ly(data = features, x = ~ai_score, type = "histogram", nbinsx = 30, marker = list(color = "#3498db", line = list(color = "white", width = 1)), opacity = 0.7) %>% layout(title = "AI Score Distribution", xaxis = list(title = "AI Score"), yaxis = list(title = "Count"))
+plot_ly(data = features, x = ~ai_score, type = "histogram", nbinsx = 30, marker = list(color = "#3498db", line = list(color = "white", width = 1)), opacity = 0.7) %>% layout(title = "AI Score Distribution", xaxis = list(title = "AI Score"), yaxis = list(title = "Count"),
+  shapes = list(
+    list(type = "line", x0 = 0.75, x1 = 0.75, y0 = 0, y1 = 1, 
+         yref = "paper", line = list(color = "#e74c3c", width = 2, dash = "dash"))
+  ),
+  annotations = list(
+    list(x = 0.85, y = 0.95, text = "🏆 Leader Threshold", 
+         showarrow = FALSE, xref = "x", yref = "paper",
+         font = list(size = 10, color = "#e74c3c"))
+  ))
 ```
 
 ### AI Label Breakdown
@@ -281,7 +481,12 @@ Row {.tabset}
 ### Unicorn Scatter Plot
 ```{r}
 unicorn_data <- features %>% filter(unicorn_tier %in% c("Top Unicorn Candidate", "Emerging Unicorn Candidate", "Growth Candidate"))
-plot_ly(data = unicorn_data, x = ~volatility, y = ~revenue_growth * 100, color = ~unicorn_tier, colors = c("Top Unicorn Candidate" = "#e74c3c", "Emerging Unicorn Candidate" = "#f39c12", "Growth Candidate" = "#3498db"), type = "scatter", mode = "markers", text = ~paste(company_name, "<br>Growth:", round(revenue_growth * 100, 1), "%<br>Volatility:", round(volatility, 3)), hoverinfo = "text", marker = list(size = 12, opacity = 0.7)) %>% layout(title = "Growth vs Volatility - Unicorn Candidates", xaxis = list(title = "Volatility"), yaxis = list(title = "Revenue Growth (%)"))
+plot_ly(data = unicorn_data, x = ~volatility, y = ~revenue_growth * 100, color = ~unicorn_tier, colors = c("Top Unicorn Candidate" = "#e74c3c", "Emerging Unicorn Candidate" = "#f39c12", "Growth Candidate" = "#3498db"), type = "scatter", mode = "markers",
+  text = ~paste("<b>", company_name, "</b><br>",
+                "📈 Growth:", round(revenue_growth * 100, 1), "%<br>",
+                "📊 Volatility:", round(volatility, 3), "<br>",
+                "🎯 AI Score:", round(ai_score, 3)),
+  hoverinfo = "text", marker = list(size = 12, opacity = 0.7)) %>% layout(title = "Growth vs Volatility - Unicorn Candidates", xaxis = list(title = "Volatility"), yaxis = list(title = "Revenue Growth (%)"))
 ```
 
 ### Unicorn Watchlist Table
