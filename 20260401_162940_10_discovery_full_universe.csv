@@ -1,0 +1,31 @@
+"ticker","innovation_score","ai_score","discovery_tier","innovation_rank","ai_rank","combined_rank"
+"TAK",1,1,"Tier 1: Top 10 Opportunities",1,1,1
+"TCOM",0.875,0.875,"Tier 1: Top 10 Opportunities",2,2,2
+"WB",0.875,0.875,"Tier 1: Top 10 Opportunities",3,3,3
+"SNY",0.85,0.85,"Tier 1: Top 10 Opportunities",4,4,4
+"SONY",0.85,0.85,"Tier 1: Top 10 Opportunities",5,5,5
+"UL",0.85,0.85,"Tier 1: Top 10 Opportunities",6,6,6
+"WORK",0.85,0.85,"Tier 1: Top 10 Opportunities",7,7,7
+"NTES",0.825,0.825,"Tier 1: Top 10 Opportunities",8,8,8
+"NIO",0.725,0.725,"Tier 1: Top 10 Opportunities",9,9,9
+"IQ",0.725,0.725,"Tier 1: Top 10 Opportunities",10,10,10
+"NSRGY",0.65,0.65,"Tier 2: Strong Candidates",11,11,11
+"SIEGY",0.65,0.65,"Tier 2: Strong Candidates",12,12,12
+"RKUNY",0.6,0.6,"Tier 2: Strong Candidates",13,13,13
+"ICE",0.6,0.6,"Tier 2: Strong Candidates",14,14,14
+"NVO",0.575,0.575,"Tier 2: Strong Candidates",15,15,15
+"SMCAY",0.575,0.575,"Tier 2: Strong Candidates",16,16,16
+"SMFG",0.575,0.575,"Tier 2: Strong Candidates",17,17,17
+"CAJPY",0.55,0.55,"Tier 2: Strong Candidates",18,18,18
+"ANT",0.55,0.55,"Tier 2: Strong Candidates",19,19,19
+"BIDU",0.525,0.525,"Tier 2: Strong Candidates",20,20,20
+"MITSY",0.525,0.525,"Tier 2: Strong Candidates",21,21,21
+"SSDOY",0.525,0.525,"Tier 2: Strong Candidates",22,22,22
+"TTDKY",0.525,0.525,"Tier 2: Strong Candidates",23,23,23
+"HSBC",0.525,0.525,"Tier 2: Strong Candidates",24,24,24
+"IBN",0.525,0.525,"Tier 2: Strong Candidates",25,25,25
+"NJDCY",0.5,0.5,"Tier 3: Watch List",26,26,26
+"HMC",0.475,0.475,"Tier 3: Watch List",27,27,27
+"SQM",0.45,0.45,"Tier 3: Watch List",28,28,28
+"HTHIY",0.425,0.425,"Tier 3: Watch List",29,29,29
+"RMSG",0.35,0.35,"Tier 3: Watch List",30,30,30
