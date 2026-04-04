@@ -316,8 +316,6 @@ body, .main-container {
 }
 ```
 ```{r reactive, echo=FALSE}
-# Get multiplier for AI score calculation
-multiplier <- if("multiplier" %in% names(features)) unique(features$multiplier)[1] else 1.5
 
 # --- Reactive Observers for Weight Adjustments ---
 
