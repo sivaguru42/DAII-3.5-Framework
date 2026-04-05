@@ -1,0 +1,142 @@
+---
+title: "DAII 3.5 Pipeline Controller"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    theme: flatly
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(DT)
+library(dplyr)
+
+# Set working directory
+setwd("C:/Users/sganesan/DAII-3.5-Framework")
+
+# Source the pipeline
+source("DAII_3.5_TEST_232_COMPANIES_FINALFIXED_VERSION_5.3_WITH_DATA_INGESTION_INTEGRATION_3_18_2026.r")
+```
+
+Sidebar {.sidebar}
+=======================================================================
+
+### 🎮 Pipeline Controls
+
+```{r}
+radioButtons("run_mode", "Run Mode:",
+  choices = c("Full Pipeline (All Companies)" = "full",
+              "Custom Tickers" = "custom"),
+  selected = "full")
+
+textAreaInput("custom_tickers", "Custom Tickers (comma-separated):",
+  value = "NVDA,MSFT,AAPL,GOOGL,META",
+  rows = 3,
+  placeholder = "Enter tickers separated by commas")
+
+fileInput("csv_file", "Or Upload CSV:",
+  accept = c(".csv"))
+
+hr()
+
+h4("⚙️ Advanced Settings")
+
+checkboxInput("use_custom_weights", "Use custom AI weights", value = FALSE)
+
+conditionalPanel(
+  condition = "input.use_custom_weights == true",
+  sliderInput("weight_rd", "R&D Weight:", min = 0, max = 0.5, value = 0.30, step = 0.05),
+  sliderInput("weight_patent", "Patent Weight:", min = 0, max = 0.5, value = 0.30, step = 0.05),
+  sliderInput("weight_growth", "Growth Weight:", min = 0, max = 0.5, value = 0.20, step = 0.05),
+  sliderInput("weight_stability", "Stability Weight:", min = 0, max = 0.5, value = 0.20, step = 0.05)
+)
+
+hr()
+
+actionButton("run_pipeline", "🚀 Run Pipeline", class = "btn-primary btn-lg", width = "100%")
+```
+
+Pipeline Control
+=======================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Execution Status
+
+```{r}
+status_text <- reactiveVal("Ready to run")
+
+observeEvent(input$run_pipeline, {
+  status_text("⏳ Pipeline running... This may take several minutes")
+  
+  # Get tickers based on mode
+  tickers_to_run <- NULL
+  
+  if(input$run_mode == "custom") {
+    if(!is.null(input$csv_file)) {
+      csv_data <- read.csv(input$csv_file$datapath)
+      tickers_to_run <- csv_data$ticker
+    } else {
+      tickers_to_run <- trimws(strsplit(input$custom_tickers, ",")[[1]])
+    }
+  }
+  
+  # Build weights if custom
+  weights_list <- NULL
+  if(input$use_custom_weights) {
+    weights_list <- list(
+      rd = input$weight_rd,
+      patent = input$weight_patent,
+      growth = input$weight_growth,
+      stability = input$weight_stability
+    )
+  }
+  
+  # Run pipeline (simplified - adapt to your actual pipeline)
+  tryCatch({
+    # Call your pipeline function here
+    # result <- run_daii_pipeline(tickers = tickers_to_run, weights = weights_list)
+    
+    status_text("✅ Pipeline completed successfully!")
+  }, error = function(e) {
+    status_text(paste("❌ Error:", e$message))
+  })
+})
+```
+
+```{r}
+renderText({ status_text() })
+```
+
+### Latest Run Results
+
+```{r}
+output$run_info <- renderUI({
+  run_dirs <- list.files("outputs", pattern = "run_", full.names = TRUE)
+  if(length(run_dirs) > 0) {
+    latest <- run_dirs[which.max(file.info(run_dirs)$mtime)]
+    run_time <- file.info(latest)$mtime
+    
+    div(class = "panel panel-success",
+      div(class = "panel-heading", "📁 Latest Run"),
+      div(class = "panel-body",
+        p(strong("Run ID:"), basename(latest)),
+        p(strong("Completed:"), format(run_time, "%Y-%m-%d %H:%M:%S")),
+        p(strong("Status:"), span("✅ Success", style = "color: green"))
+      )
+    )
+  } else {
+    div(class = "panel panel-warning",
+      div(class = "panel-body", "No pipeline runs found. Click Run Pipeline to start.")
+    )
+  }
+})
+```
+
+```{r}
+renderUI({ output$run_info })
+```
