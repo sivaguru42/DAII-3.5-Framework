@@ -1,0 +1,32 @@
+"ticker","innovation_score","ai_score","discovery_tier","innovation_rank","ai_rank","combined_rank","discovery_quality_weight","discovery_ai_weight"
+"TAK",0.95,0.95,"Tier 1: Top 10 Opportunities",1,1,1,0.192893401015228,0.166666666666667
+"TCOM",0.875,0.875,"Tier 1: Top 10 Opportunities",2,2,2,0.177664974619289,0.153508771929825
+"NTES",0.825,0.825,"Tier 1: Top 10 Opportunities",3,3,3,0.16751269035533,0.144736842105263
+"NIO",0.775,0.775,"Tier 1: Top 10 Opportunities",4,4,4,0,0.135964912280702
+"WB",0.775,0.775,"Tier 1: Top 10 Opportunities",5,5,5,0.157360406091371,0.135964912280702
+"SNY",0.75,0.75,"Tier 1: Top 10 Opportunities",6,6,6,0.152284263959391,0.131578947368421
+"SONY",0.75,0.75,"Tier 1: Top 10 Opportunities",7,7,7,0.152284263959391,0.131578947368421
+"UL",0.7,0.7,"Tier 1: Top 10 Opportunities",8,8,8,0,0
+"WORK",0.7,0.7,"Tier 1: Top 10 Opportunities",9,9,9,0,0
+"IQ",0.675,0.675,"Tier 1: Top 10 Opportunities",10,10,10,0,0
+"CAJPY",0.6,0.6,"Tier 2: Strong Candidates",11,11,11,0,0
+"RKUNY",0.6,0.6,"Tier 2: Strong Candidates",12,12,12,0,0
+"ANT",0.6,0.6,"Tier 2: Strong Candidates",13,13,13,0,0
+"ICE",0.6,0.6,"Tier 2: Strong Candidates",14,14,14,0,0
+"SAIL",0.6,0.6,"Tier 2: Strong Candidates",15,15,15,0,0
+"NVO",0.575,0.575,"Tier 2: Strong Candidates",16,16,16,0,0
+"NSRGY",0.55,0.55,"Tier 2: Strong Candidates",17,17,17,0,0
+"SIEGY",0.55,0.55,"Tier 2: Strong Candidates",18,18,18,0,0
+"BIDU",0.525,0.525,"Tier 2: Strong Candidates",19,19,19,0,0
+"MITSY",0.525,0.525,"Tier 2: Strong Candidates",20,20,20,0,0
+"SMFG",0.525,0.525,"Tier 2: Strong Candidates",21,21,21,0,0
+"HSBC",0.525,0.525,"Tier 2: Strong Candidates",22,22,22,0,0
+"IBN",0.525,0.525,"Tier 2: Strong Candidates",23,23,23,0,0
+"NJDCY",0.5,0.5,"Tier 2: Strong Candidates",24,24,24,0,0
+"SMCAY",0.475,0.475,"Tier 2: Strong Candidates",25,25,25,0,0
+"HTHIY",0.425,0.425,"Tier 3: Watch List",26,26,26,0,0
+"TTDKY",0.425,0.425,"Tier 3: Watch List",27,27,27,0,0
+"HMC",0.375,0.375,"Tier 3: Watch List",28,28,28,0,0
+"SSDOY",0.375,0.375,"Tier 3: Watch List",29,29,29,0,0
+"RMSG",0.35,0.35,"Tier 3: Watch List",30,30,30,0,0
+"SQM",0.35,0.35,"Tier 3: Watch List",31,31,31,0,0
