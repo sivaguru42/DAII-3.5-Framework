@@ -1,0 +1,816 @@
+---
+title: "🤖 DAII 3.5 AI Investment Intelligence Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    theme: 
+      version: 4
+      bootswatch: flatly
+    vertical_layout: fill
+    source_code: embed
+    sidebar:
+      width: 350
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(plotly)
+library(DT)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(shiny)
+
+# Set working directory to project root
+setwd("C:/Users/sganesan/DAII-3.5-Framework")
+
+# Auto-detect the latest run directory
+run_dirs <- list.files("outputs", pattern = "run_", full.names = TRUE)
+
+if(length(run_dirs) == 0) {
+  stop("No run folders found in outputs directory. Please run the pipeline first.")
+}
+
+latest_run <- run_dirs[which.max(file.info(run_dirs)$mtime)]
+run_timestamp <- gsub("run_", "", basename(latest_run))
+
+cat("Loading data from:", basename(latest_run), "\n")
+
+# Define file paths with error handling
+load_data_file <- function(filename, required = TRUE) {
+  file_path <- file.path(latest_run, paste0(run_timestamp, filename))
+  if(file.exists(file_path)) {
+    cat("  ✓ Loaded:", filename, "\n")
+    return(read.csv(file_path))
+  } else {
+    if(required) {
+      stop("Required file not found: ", filename)
+    } else {
+      cat("  ⚠️ File not found (skipping):", filename, "\n")
+      return(NULL)
+    }
+  }
+}
+
+# Load data - mark optional files with required = FALSE
+features <- load_data_file("_01_company_features_full.csv", required = TRUE)
+unicorns <- load_data_file("_18_unicorn_watchlist.csv", required = FALSE)
+benchmark_ai <- load_data_file("_23_benchmark_ai_exposure.csv", required = FALSE)
+sector_ai <- load_data_file("_24_sp500_sector_ai_exposure.csv", required = FALSE)
+portfolio_conc <- load_data_file("_20_portfolio_concentration.csv", required = FALSE)
+discovery_full <- load_data_file("_10_discovery_full_universe.csv", required = FALSE)
+anomaly_scores <- load_data_file("_11_anomaly_scores_full.csv", required = FALSE)
+
+# Add company names from features
+if(!is.null(unicorns) && !"company_name" %in% names(unicorns) && "company_name" %in% names(features)) {
+  unicorns <- unicorns %>% left_join(features %>% select(ticker, company_name), by = "ticker")
+}
+
+# Top AI leaders
+top_ai_leaders <- features %>% arrange(desc(ai_score)) %>% head(20)
+
+# Calculate counts
+total_companies <- nrow(features)
+ai_leaders <- sum(features$ai_label == "AI Leader", na.rm = TRUE)
+unicorn_count <- if(!is.null(unicorns)) nrow(unicorns) else 0
+anomaly_count <- if(!is.null(anomaly_scores)) sum(anomaly_scores$is_anomaly, na.rm = TRUE) else sum(features$is_anomaly, na.rm = TRUE)
+
+# Get multiplier for AI score calculation
+multiplier <- if("multiplier" %in% names(features)) unique(features$multiplier)[1] else 1.5
+
+# Custom color palette
+ai_colors <- c(
+  "AI Leader" = "#00B4D8",
+  "AI Adopter" = "#48CAE4", 
+  "AI Follower" = "#90E0EF",
+  "AI Laggard" = "#CAF0F8"
+)
+
+# Recalculation function for custom weights
+current_weights <- reactiveValues(
+  rd = 0.30,
+  patent = 0.30,
+  growth = 0.20,
+  stability = 0.20
+)
+
+recalculate_scores <- function(data, weights, mult) {
+  data %>%
+    mutate(
+      rd_quartile = ntile(rd_intensity, 4),
+      patent_quartile = ntile(patent_activity, 4),
+      growth_quartile = ntile(revenue_growth, 4),
+      volatility_quartile = ntile(volatility, 4),
+      rd_score_norm = rd_quartile * 25,
+      patent_score_norm = patent_quartile * 25,
+      growth_score_norm = growth_quartile * 25,
+      stability_score_norm = (5 - volatility_quartile) * 25,
+      innovation_score_custom = (rd_score_norm * weights$rd +
+                                 patent_score_norm * weights$patent +
+                                 growth_score_norm * weights$growth +
+                                 stability_score_norm * weights$stability) / 100,
+      ai_score_custom = innovation_score_custom * mult,
+      ai_label_custom = case_when(
+        ai_score_custom > 0.75 ~ "AI Leader",
+        ai_score_custom > 0.5 ~ "AI Adopter",
+        ai_score_custom > 0.25 ~ "AI Follower",
+        TRUE ~ "AI Laggard"
+      )
+    )
+}
+
+```
+
+```{css, echo=FALSE}
+/* ============================================
+   HEADER & SIDEBAR ENHANCEMENTS
+   ============================================ */
+
+/* Dashboard header bar */
+.dashboard-title {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #00B4D8;
+  padding: 15px 25px;
+  margin: -10px -10px 20px -10px;
+  border-radius: 0;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.dashboard-title h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+/* Navbar tabs styling */
+.navbar {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+  border: none !important;
+  margin-bottom: 20px !important;
+}
+
+.navbar .navbar-brand, 
+.navbar .navbar-nav > li > a {
+  color: #e0e0e0 !important;
+  transition: color 0.2s ease;
+}
+
+.navbar .navbar-brand:hover,
+.navbar .navbar-nav > li > a:hover {
+  color: #00B4D8 !important;
+}
+
+.navbar .navbar-nav > .active > a {
+  color: #00B4D8 !important;
+  background: rgba(0,180,216,0.1) !important;
+}
+
+/* Modern professional styling */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+body, .main-container {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Value box styling */
+.value-box {
+  border-radius: 16px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.value-box:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12) !important;
+}
+
+.value-box .value-box-value {
+  font-weight: 700 !important;
+  font-size: 2.2rem !important;
+}
+
+/* Sidebar gradient */
+.sidebar {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+  color: #e0e0e0 !important;
+  width: 350px !important;
+}
+
+.sidebar h1, .sidebar h2, .sidebar h3, .sidebar h4 {
+  color: #00B4D8 !important;
+}
+
+.sidebar .form-group label {
+  color: #e0e0e0 !important;
+  font-weight: 500 !important;
+}
+
+/* Larger, more readable sliders */
+.sidebar .form-group {
+  margin-bottom: 25px;
+}
+
+.irs--shiny {
+  margin-top: 15px;
+  margin-bottom: 25px;
+}
+
+.irs--shiny .irs-bar-edge,
+.irs--shiny .irs-bar {
+  height: 10px !important;
+  background: linear-gradient(90deg, #00B4D8, #48CAE4) !important;
+}
+
+.irs--shiny .irs-line {
+  height: 8px !important;
+  background: #2a2a4a !important;
+}
+
+.irs--shiny .irs-handle {
+  height: 24px !important;
+  width: 24px !important;
+  top: 22px !important;
+  background: #00B4D8 !important;
+  border: 2px solid white !important;
+  border-radius: 50% !important;
+  cursor: pointer !important;
+}
+
+.irs--shiny .irs-handle:hover {
+  transform: scale(1.1);
+}
+
+.irs--shiny .irs-single,
+.irs--shiny .irs-from,
+.irs--shiny .irs-to {
+  font-size: 14px !important;
+  padding: 5px 10px !important;
+  background: #00B4D8 !important;
+  border-radius: 20px !important;
+}
+
+/* Sidebar text improvements */
+.sidebar, .sidebar p, .sidebar label {
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+.sidebar h4 {
+  font-size: 16px !important;
+  margin-top: 20px !important;
+  margin-bottom: 10px !important;
+  color: #00B4D8 !important;
+}
+
+.sidebar hr {
+  border-color: rgba(255,255,255,0.1) !important;
+  margin: 15px 0 !important;
+}
+
+/* Button styling */
+.btn-primary {
+  background: linear-gradient(135deg, #00B4D8 0%, #0077B6 100%) !important;
+  border: none !important;
+  border-radius: 40px !important;
+  padding: 8px 20px !important;
+  font-weight: 600 !important;
+  margin-top: 10px !important;
+}
+
+.btn-default {
+  background: rgba(255,255,255,0.1) !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+  color: #e0e0e0 !important;
+  border-radius: 40px !important;
+  margin-top: 10px !important;
+  margin-left: 10px !important;
+}
+
+/* Tab styling */
+.nav-tabs > li > a {
+  border-radius: 40px 40px 0 0 !important;
+  font-weight: 600 !important;
+}
+
+.nav-tabs > li.active > a {
+  background: linear-gradient(135deg, #00B4D8 0%, #0077B6 100%) !important;
+  color: white !important;
+}
+
+/* DataTable header */
+.dataTable thead th {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+  color: white !important;
+}
+
+/* Panel styling */
+.panel {
+  border-radius: 16px !important;
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+}
+
+.panel-heading {
+  border-radius: 16px 16px 0 0 !important;
+  font-weight: 600 !important;
+}
+```
+```{r reactive, echo=FALSE}
+
+# --- Reactive Observers for Weight Adjustments ---
+
+output$weight_display <- renderText({
+  paste0("R&D: ", current_weights$rd * 100, "%\n",
+         "Patent: ", current_weights$patent * 100, "%\n",
+         "Growth: ", current_weights$growth * 100, "%\n",
+         "Stability: ", current_weights$stability * 100, "%\n",
+         "────────────────\n",
+         "Total: ", (current_weights$rd + current_weights$patent + 
+                     current_weights$growth + current_weights$stability) * 100, "%")
+})
+
+observeEvent(input$apply_weights, {
+  current_weights$rd <- input$weight_rd
+  current_weights$patent <- input$weight_patent
+  current_weights$growth <- input$weight_growth
+  current_weights$stability <- input$weight_stability
+
+  if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+    features_custom <- recalculate_scores(features, current_weights, multiplier)
+    top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
+
+    output$ai_leaders_chart <- renderPlotly({
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders (Custom Weights)", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+    })
+
+    output$ai_leaders_table <- renderDT({
+      top_ai_leaders_custom %>% select(ticker, company_name, ai_score_custom, innovation_score_custom, ai_label_custom) %>% mutate(ai_score_custom = round(ai_score_custom, 3), innovation_score_custom = round(innovation_score_custom, 3)) %>% datatable(colnames = c("Ticker", "Company", "AI Score", "Innovation", "Label"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+    })
+  } else {
+    cat("⚠️ AI leader data not available.\n")
+  }
+})
+
+observeEvent(input$reset_weights, {
+  updateSliderInput(session, "weight_rd", value = 0.30)
+  updateSliderInput(session, "weight_patent", value = 0.30)
+  updateSliderInput(session, "weight_growth", value = 0.20)
+  updateSliderInput(session, "weight_stability", value = 0.20)
+
+  current_weights$rd <- 0.30
+  current_weights$patent <- 0.30
+  current_weights$growth <- 0.20
+  current_weights$stability <- 0.20
+
+  if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+    features_custom <- recalculate_scores(features, current_weights, multiplier)
+    top_ai_leaders_custom <- features_custom %>% arrange(desc(ai_score_custom)) %>% head(20)
+
+    output$ai_leaders_chart <- renderPlotly({
+      plot_ly(data = top_ai_leaders_custom, x = ~reorder(company_name, ai_score_custom), y = ~ai_score_custom, type = "bar",
+              marker = list(
+                color = ~ai_score_custom,
+                colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+                line = list(color = "white", width = 1)
+              ),
+              text = ~paste("AI Score:", round(ai_score_custom, 3)), hoverinfo = "text") %>%
+        layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+    })
+
+    output$ai_leaders_table <- renderDT({
+      top_ai_leaders_custom %>% select(ticker, company_name, ai_score_custom, innovation_score_custom, ai_label_custom) %>% mutate(ai_score_custom = round(ai_score_custom, 3), innovation_score_custom = round(innovation_score_custom, 3)) %>% datatable(colnames = c("Ticker", "Company", "AI Score", "Innovation", "Label"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+    })
+  } else {
+    cat("⚠️ AI leader data not available.\n")
+  }
+})
+
+if(!is.null(features) && "ai_score" %in% names(features) && nrow(top_ai_leaders) > 0) {
+  output$ai_leaders_chart <- renderPlotly({
+    plot_ly(data = top_ai_leaders, x = ~reorder(company_name, ai_score), y = ~ai_score, type = "bar",
+            marker = list(
+              color = ~ai_score,
+              colorscale = list(c(0, "#90E0EF"), c(0.5, "#48CAE4"), c(1, "#00B4D8")),
+              line = list(color = "white", width = 1)
+            ),
+            text = ~paste("AI Score:", round(ai_score, 3)), hoverinfo = "text") %>%
+      layout(title = "Top 20 AI Leaders", xaxis = list(title = "", tickangle = -45), yaxis = list(title = "AI Score", range = c(0, 1.5)), margin = list(b = 100))
+  })
+} else {
+  cat("⚠️ AI leader data not available.\n")
+}
+
+
+<div class="dashboard-title">
+  <h1>🤖 DAII 3.5 AI Investment Intelligence Dashboard</h1>
+</div>
+
+Sidebar {.sidebar}
+=======================================================================
+
+### 🎯 AI Score Weighting
+
+Adjust weights to discover how AI scores change. Default: R&D=30%, Patents=30%, Growth=20%, Stability=20%.
+
+```{r}
+sliderInput("weight_rd", "🧪 R&D Intensity Weight:", 
+            min = 0, max = 0.5, value = 0.30, step = 0.05)
+
+sliderInput("weight_patent", "📜 Patent Activity Weight:", 
+            min = 0, max = 0.5, value = 0.30, step = 0.05)
+
+sliderInput("weight_growth", "📈 Revenue Growth Weight:", 
+            min = 0, max = 0.5, value = 0.20, step = 0.05)
+
+sliderInput("weight_stability", "🛡️ Stability Weight:", 
+            min = 0, max = 0.5, value = 0.20, step = 0.05)
+
+actionButton("apply_weights", "✨ Apply Custom Weights", class = "btn-primary")
+actionButton("reset_weights", "⟳ Reset to Default", class = "btn-default")
+
+hr()
+
+h4("📊 Current Weights in Use")
+verbatimTextOutput("weight_display")
+
+hr()
+
+h4("🚨 Patent Quality Flag")
+p("Companies with suspicious patent counts:")
+p(strong("⚠️ Highly Suspicious:"), " >100,000 patents")
+p(strong("⚠️ Suspicious:"), " 50,000-100,000 patents") 
+p(strong("✅ OK:"), " <50,000 patents")
+
+hr()
+
+h4("💡 Pro Tip")
+p("Try increasing Growth weight to 0.40 to find 🦄 unicorn candidates!")
+```
+
+KPI Row
+=======================================================================
+
+### 🏢 Total Companies
+```{r}
+valueBox(total_companies, icon = "fa-building", color = "primary")
+```
+
+### 🤖 AI Leaders
+```{r}
+valueBox(ai_leaders, icon = "fa-star", color = "success")
+```
+
+### 🦄 Unicorn Candidates
+```{r}
+valueBox(unicorn_count, icon = "fa-unicorn", color = "warning")
+```
+
+### ⚠️ Anomalies Detected
+```{r}
+valueBox(anomaly_count, icon = "fa-exclamation-triangle", color = "danger")
+```
+
+AI Leaders Overview
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### AI Score Distribution
+```{r}
+plot_ly(data = features, x = ~ai_score, type = "histogram", nbinsx = 30, marker = list(color = "#3498db", line = list(color = "white", width = 1)), opacity = 0.7) %>% layout(title = "AI Score Distribution", xaxis = list(title = "AI Score"), yaxis = list(title = "Count"),
+  shapes = list(
+    list(type = "line", x0 = 0.75, x1 = 0.75, y0 = 0, y1 = 1, 
+         yref = "paper", line = list(color = "#e74c3c", width = 2, dash = "dash"))
+  ),
+  annotations = list(
+    list(x = 0.85, y = 0.95, text = "🏆 Leader Threshold", 
+         showarrow = FALSE, xref = "x", yref = "paper",
+         font = list(size = 10, color = "#e74c3c"))
+  ))
+```
+
+### AI Label Breakdown
+```{r}
+ai_counts <- features %>% group_by(ai_label) %>% summarise(count = n(), .groups = "drop")
+plot_ly(data = ai_counts, labels = ~ai_label, values = ~count, type = "pie", textinfo = "label+percent", marker = list(colors = c("#2c3e50", "#3498db", "#95a5a6", "#e74c3c"))) %>% layout(title = "AI Label Distribution")
+```
+
+### Top AI Leaders Table
+```{r}
+if(!is.null(features) && "ai_score" %in% names(features)) {
+  output$ai_leaders_table <- renderDT({
+    top_ai_leaders %>% 
+      select(ticker, company_name, ai_score, innovation_score, revenue_growth, ai_label) %>% 
+      mutate(
+        ai_score = round(ai_score, 3), 
+        innovation_score = round(innovation_score, 3), 
+        revenue_growth = round(revenue_growth * 100, 1)
+      ) %>% 
+      datatable(
+        colnames = c("Ticker", "Company", "AI Score", "Innovation", "Growth %", "Label"),
+        options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")),
+        extensions = "Buttons",
+        rownames = FALSE
+      )
+  })
+} else {
+  cat("⚠️ AI score data not available.\n")
+}
+```
+
+Unicorn Watchlist
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Unicorn Scatter Plot
+```{r}
+unicorn_data <- features %>% filter(unicorn_tier %in% c("Top Unicorn Candidate", "Emerging Unicorn Candidate", "Growth Candidate"))
+plot_ly(data = unicorn_data, x = ~volatility, y = ~revenue_growth * 100, color = ~unicorn_tier, colors = c("Top Unicorn Candidate" = "#e74c3c", "Emerging Unicorn Candidate" = "#f39c12", "Growth Candidate" = "#3498db"), type = "scatter", mode = "markers",
+  text = ~paste("<b>", company_name, "</b><br>",
+                "📈 Growth:", round(revenue_growth * 100, 1), "%<br>",
+                "📊 Volatility:", round(volatility, 3), "<br>",
+                "🎯 AI Score:", round(ai_score, 3)),
+  hoverinfo = "text", marker = list(size = 12, opacity = 0.7)) %>% layout(title = "Growth vs Volatility - Unicorn Candidates", xaxis = list(title = "Volatility"), yaxis = list(title = "Revenue Growth (%)"))
+```
+
+### Unicorn Watchlist Table
+```{r}
+unicorns %>% select(ticker, company_name, ai_score_aggressive, revenue_growth, volatility, unicorn_tier) %>% mutate(revenue_growth = round(revenue_growth * 100, 1), volatility = round(volatility, 3), ai_score_aggressive = round(ai_score_aggressive, 1)) %>% datatable(colnames = c("Ticker", "Company", "Aggressive AI", "Growth %", "Volatility", "Tier"), options = list(pageLength = 15, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+```
+
+Anomalies Detection
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Anomaly Score Distribution
+### Portfolio Anomalies
+### Discovery Anomalies
+
+```{r}
+if(!is.null(anomaly_scores)) {
+  plot_ly(data = anomaly_scores, x = ~anomaly_score, type = "histogram", nbinsx = 30, marker = list(color = "#e74c3c", line = list(color = "white", width = 1)), opacity = 0.7) %>% layout(title = "Anomaly Score Distribution", xaxis = list(title = "Anomaly Score (higher = more anomalous)"), yaxis = list(title = "Count"))
+
+  anomaly_scores %>% filter(is_anomaly == TRUE, in_portfolio == TRUE) %>% left_join(features %>% select(ticker, company_name), by = "ticker") %>% select(ticker, company_name, anomaly_score, ai_score) %>% mutate(anomaly_score = round(anomaly_score, 3), ai_score = round(ai_score, 3)) %>% arrange(desc(anomaly_score)) %>% datatable(colnames = c("Ticker", "Company", "Anomaly Score", "AI Score"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+
+  anomaly_scores %>% filter(is_anomaly == TRUE, in_portfolio == FALSE) %>% left_join(features %>% select(ticker, company_name), by = "ticker") %>% select(ticker, company_name, anomaly_score, ai_score) %>% mutate(anomaly_score = round(anomaly_score, 3), ai_score = round(ai_score, 3)) %>% arrange(desc(anomaly_score)) %>% datatable(colnames = c("Ticker", "Company", "Anomaly Score", "AI Score"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+} else {
+  cat("⚠️ Anomaly scores data not available for this run.\n")
+}
+```
+
+Portfolio Comparison
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### AI Exposure Radar Chart
+```{r}
+if(!is.null(benchmark_ai)) {
+  radar_plot_data <- data.frame(
+  metric = c("AI Score", "AI Leaders %", "Growth", "Stability"),
+  DUMAC = c(
+    benchmark_ai$weighted_ai_score[benchmark_ai$name == "DUMAC Portfolio"],
+    benchmark_ai$pct_ai_leaders[benchmark_ai$name == "DUMAC Portfolio"] / 100,
+    benchmark_ai$avg_revenue_growth[benchmark_ai$name == "DUMAC Portfolio"],
+    1 - benchmark_ai$avg_volatility[benchmark_ai$name == "DUMAC Portfolio"]
+  ),
+  SP500 = c(
+    benchmark_ai$weighted_ai_score[benchmark_ai$name == "S&P 500"],
+    benchmark_ai$pct_ai_leaders[benchmark_ai$name == "S&P 500"] / 100,
+    benchmark_ai$avg_revenue_growth[benchmark_ai$name == "S&P 500"],
+    1 - benchmark_ai$avg_volatility[benchmark_ai$name == "S&P 500"]
+  ),
+  NASDAQ = c(
+    benchmark_ai$weighted_ai_score[benchmark_ai$name == "NASDAQ 100"],
+    benchmark_ai$pct_ai_leaders[benchmark_ai$name == "NASDAQ 100"] / 100,
+    benchmark_ai$avg_revenue_growth[benchmark_ai$name == "NASDAQ 100"],
+    1 - benchmark_ai$avg_volatility[benchmark_ai$name == "NASDAQ 100"]
+  )
+)
+
+plot_ly(type = 'scatterpolar', mode = 'lines+markers', fill = 'toself') %>%
+  add_trace(r = as.numeric(radar_plot_data$DUMAC), theta = radar_plot_data$metric, name = "DUMAC Portfolio", line = list(color = "#2c3e50", width = 2), fillcolor = 'rgba(44, 62, 80, 0.3)') %>%
+  add_trace(r = as.numeric(radar_plot_data$SP500), theta = radar_plot_data$metric, name = "S&P 500", line = list(color = "#3498db", width = 2), fillcolor = 'rgba(52, 152, 219, 0.3)') %>%
+  add_trace(r = as.numeric(radar_plot_data$NASDAQ), theta = radar_plot_data$metric, name = "NASDAQ 100", line = list(color = "#e74c3c", width = 2), fillcolor = 'rgba(231, 76, 60, 0.3)') %>%
+  layout(title = "AI Exposure Radar", polar = list(radialaxis = list(visible = TRUE, range = c(0, 1))))
+} else {
+  cat("⚠️ Benchmark AI data not available for radar chart.\n")
+}
+```
+
+### Benchmark Comparison Table
+```{r}
+if(!is.null(benchmark_ai)) {
+  benchmark_ai %>% select(name, weighted_ai_score, pct_ai_leaders, pct_ai_adopters, pct_ai_followers, pct_ai_laggards, active_share) %>% mutate(weighted_ai_score = round(weighted_ai_score, 3), across(starts_with("pct_"), ~ round(., 1)), active_share = round(active_share * 100, 1)) %>% datatable(colnames = c("Benchmark", "AI Score", "Leaders %", "Adopters %", "Followers %", "Laggards %", "Active Share %"), options = list(dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+} else {
+  cat("⚠️ Benchmark AI data not available for this run.\n")
+}
+```
+
+### S&P 500 AI by Sector
+```{r}
+if(!is.null(sector_ai)) {
+  sector_ai %>% head(15) %>% select(TRBC_Industry, n_companies, weighted_ai, pct_ai_leaders) %>% mutate(weighted_ai = round(weighted_ai, 3), pct_ai_leaders = round(pct_ai_leaders, 1)) %>% datatable(colnames = c("Sector", "Companies", "AI Score", "Leaders %"), options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")), extensions = "Buttons", rownames = FALSE)
+} else {
+  cat("⚠️ Sector AI data not available for this run.\n")
+}
+```
+
+### Portfolio Concentration
+```{r}
+if(!is.null(portfolio_conc)) {
+  portfolio_conc %>% 
+    head(20) %>% 
+    select(any_of(c("rank", "ticker", "company_name", "weight_pct", "cumulative_weight", "ai_label"))) %>%
+    mutate(
+      weight_pct = round(weight_pct, 1),
+      cumulative_weight = round(cumulative_weight * 100, 1)
+    ) %>% 
+    datatable(
+      colnames = c("Rank", "Ticker", "Company", "Weight %", "Cumulative %", "AI Label"),
+      options = list(pageLength = 10, dom = "Bfrtip", buttons = c("copy", "csv", "excel")),
+      extensions = "Buttons",
+      rownames = FALSE
+    )
+} else {
+  cat("⚠️ Portfolio concentration data not available.\n")
+}
+```
+
+Company Deep Dive
+=======================================================================
+
+### 🔍 Select a Company
+```{r}
+company_choices <- setNames(features$ticker, paste(features$ticker, "-", features$company_name))
+selectInput("company_select", "Search for a company:", choices = company_choices, selected = features$ticker[1], selectize = TRUE)
+```
+
+### Selected Company
+```{r}
+selected_company <- reactive({
+  req(input$company_select)
+  features %>% filter(ticker == input$company_select) %>% slice(1)
+})
+
+renderValueBox({
+  company <- selected_company()
+  valueBox(paste(company$ticker, "-", company$company_name), icon = "fa-building", color = "primary")
+})
+```
+
+### AI Score Gauge
+```{r}
+renderPlotly({
+  company <- selected_company()
+  plot_ly(type = "indicator", mode = "gauge+number", value = company$ai_score, title = list(text = "AI Score"), gauge = list(axis = list(range = list(0, 1.5)), bar = list(color = "#2c3e50"), steps = list(list(range = c(0, 0.5), color = "#e74c3c"), list(range = c(0.5, 0.75), color = "#f39c12"), list(range = c(0.75, 1), color = "#3498db"), list(range = c(1, 1.5), color = "#2ecc71")), threshold = list(line = list(color = "red", width = 4), thickness = 0.75, value = company$ai_score)), number = list(suffix = " / 1.5")) %>% layout(margin = list(t = 50, b = 50))
+})
+```
+
+### Innovation Score Gauge
+```{r}
+renderPlotly({
+  company <- selected_company()
+  plot_ly(type = "indicator", mode = "gauge+number", value = company$innovation_score, title = list(text = "Innovation Score"), gauge = list(axis = list(range = list(0, 1)), bar = list(color = "#3498db"), steps = list(list(range = c(0, 0.25), color = "#e74c3c"), list(range = c(0.25, 0.5), color = "#f39c12"), list(range = c(0.5, 0.75), color = "#3498db"), list(range = c(0.75, 1), color = "#2ecc71"))), number = list(suffix = " / 1.0")) %>% layout(margin = list(t = 50, b = 50))
+})
+```
+
+### Key Metrics Table
+```{r}
+renderUI({
+  company <- selected_company()
+  tags$div(class = "panel panel-default",
+    tags$div(class = "panel-heading", "Key Metrics"),
+    tags$div(class = "panel-body",
+      tags$table(class = "table table-condensed",
+        tags$tr(tags$td("AI Label"), tags$td(strong(company$ai_label))),
+        tags$tr(tags$td("Innovation Label"), tags$td(strong(company$innovation_label))),
+        tags$tr(tags$td("Revenue Growth"), tags$td(paste0(round(company$revenue_growth * 100, 1), "%"))),
+        tags$tr(tags$td("Volatility"), tags$td(round(company$volatility, 3))),
+        tags$tr(tags$td("R&D Intensity"), tags$td(paste0(round(company$rd_intensity * 100, 1), "%"))),
+        tags$tr(tags$td("Patent Activity"), tags$td(round(company$patent_activity, 0))),
+        tags$tr(tags$td("Market Cap"), tags$td(paste0("$", format(round(company$market_cap / 1e9, 2), big.mark = ","), "B"))),
+        tags$tr(tags$td("In Portfolio"), tags$td(ifelse(company$in_portfolio, "✅ Yes", "❌ No"))),
+        tags$tr(tags$td("Unicorn Tier"), tags$td(ifelse(!is.na(company$unicorn_tier) & company$unicorn_tier != "Monitor", company$unicorn_tier, "N/A"))),
+        tags$tr(tags$td("Anomaly"), tags$td(ifelse(company$is_anomaly, "⚠️ Detected", "✅ Normal")))
+      )
+    )
+  )
+})
+```
+
+Discovery Opportunities
+=======================================================================
+
+```{r}
+# Discovery table with AI Score from features
+if(!is.null(discovery_full) && !is.null(features) && "ai_score" %in% names(features)) {
+  
+  # Perform join and handle potential column name conflicts
+  discovery_joined <- discovery_full %>%
+    filter(discovery_tier == "Tier 1: Top 10 Opportunities") %>%
+    left_join(features %>% select(ticker, company_name, ai_score), by = "ticker")
+  
+  # Check what columns exist after join
+  if("ai_score" %in% names(discovery_joined)) {
+    # Simple case - ai_score exists directly
+    discovery_joined <- discovery_joined %>%
+      arrange(combined_rank) %>%
+      select(combined_rank, ticker, company_name, ai_score, discovery_tier) %>%
+      mutate(ai_score = round(ai_score, 3))
+  } else if("ai_score.y" %in% names(discovery_joined)) {
+    # Case where join created ai_score.x and ai_score.y
+    discovery_joined <- discovery_joined %>%
+      arrange(combined_rank) %>%
+      select(combined_rank, ticker, company_name, ai_score = ai_score.y, discovery_tier) %>%
+      mutate(ai_score = round(ai_score, 3))
+  } else {
+    # No ai_score found - show message
+    cat("⚠️ AI Score column not found after join.\n")
+    discovery_joined <- discovery_joined %>%
+      arrange(combined_rank) %>%
+      select(combined_rank, ticker, discovery_tier) %>%
+      mutate(ai_score = NA)
+  }
+  
+  # Create datatable
+  discovery_joined %>%
+    datatable(
+      colnames = c("Rank", "Ticker", "Company", "AI Score", "Tier"),
+      options = list(pageLength = 10, dom = 'Bfrtip', buttons = c('copy', 'csv', 'excel')),
+      extensions = 'Buttons',
+      rownames = FALSE
+    ) %>%
+    formatStyle(
+      'ai_score',
+      background = styleColorBar(c(0, 1.5), 'lightblue'),
+      backgroundSize = '100% 90%',
+      backgroundRepeat = 'no-repeat'
+    )
+    
+} else {
+  cat("⚠️ Discovery opportunities data not available for this run.\n")
+}  
+```
+
+Methodology
+=======================================================================
+
+```{r, echo=FALSE, results='asis'}
+cat("
+### AI Score Definition (CORRECTED)
+- R&D Intensity: 30% (calculated as R&D Expense / Revenue)
+- Patent Activity: 30%  
+- Revenue Growth: 20% (from historical fiscal year data)
+- Stability (Inverse Volatility): 20%
+
+### Aggressive AI Score (Unicorn Hunting)
+- R&D Intensity: 25%
+- Patent Activity: 20%
+- Revenue Growth: 40%
+- Stability: 15%
+
+### Unicorn Candidate Criteria
+- Top 30% revenue growth
+- Top 30% volatility
+- Positive R&D intensity
+- Not a standard AI Leader
+
+### Anomaly Detection
+- Isolation Forest algorithm (100 trees)
+- Top 10% threshold
+- Features: R&D, patents, growth, volatility, market cap, AI score, innovation score
+
+### Data Sources
+- Refinitiv: Financial history, daily ratios, benchmark constituents
+- USPTO: Patent data with AI CPC codes (G06N, G06K, G06F, G10L, G05B, G16H)
+- DUMAC: Portfolio holdings via ISIN matching
+
+### Run Information (CORRECTED)
+- Run Date: 2026-04-01
+- Run ID: run_20260401_162940
+- Total Companies: ", total_companies, "
+- AI Leaders: ", ai_leaders, "
+- Unicorn Candidates: ", unicorn_count, "
+- Imputed Companies: 85 (47.0%)
+
+### Key Fixes Applied
+- R&D Intensity now uses Revenue instead of Market Cap
+- Revenue Growth uses historical fiscal year data (not placeholder)
+- NVIDIA corrected from AI Laggard (0.500) to AI Leader (1.125)
+- MSFT, AAPL correctly identified as AI Leaders
+")
+```

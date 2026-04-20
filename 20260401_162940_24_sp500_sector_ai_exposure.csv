@@ -1,0 +1,62 @@
+"TRBC_Industry","n_companies","total_mcap","weighted_ai","pct_ai_leaders","avg_revenue_growth"
+"Search Engines",1,3474807,0.9,100,0.05
+"Software (NEC)",2,2748770.27656937,0.874999080440822,100,0.05
+"Aerospace & Defense (NEC)",2,556129.71875,0.81332833431229,100,0.05
+"Advanced Medical Equipment & Technology (NEC)",1,182595.703125,0.8,100,0.05
+"Household Electronics (NEC)",1,49.8507995605469,0.8,100,0.05
+"Internet & Mail Order Department Stores",1,2235762,0.8,100,0.05
+"Agricultural Machinery",1,152151.40625,0.75,100,0.05
+"Non-Alcoholic Beverages (NEC)",1,327330.8125,0.75,100,0.05
+"Electric Utilities (NEC)",2,295404.203125,0.731018785753778,65.5093928768892,0.05
+"Supermarkets & Convenience Stores",1,182.520004272461,0.725,100,0.05
+"Phones & Smart Phones",1,3731399,0.725,0,0.05
+"Professional Information Services (NEC)",2,166504.12109375,0.705917649255819,0,0.05
+"Pharmaceuticals (NEC)",5,1844508.80314636,0.70358406313663,0,0.05
+"Business Support Services (NEC)",1,14948.6201171875,0.7,0,0.05
+"Courier, Postal, Air Freight & Land-based Logistics (NEC)",1,83590.8203125,0.7,0,0.05
+"IT Services & Consulting (NEC)",1,227370.203125,0.7,0,0.05
+"Integrated Telecommunications Services (NEC)",1,211727.796875,0.7,0,0.05
+"Investment Banking & Brokerage Services (NEC)",1,249561.90625,0.7,0,0.05
+"Oil & Gas Refining and Marketing (NEC)",1,706933.125,0.7,0,0.05
+"Wireless Telecommunications Services (NEC)",1,202412.40625,0.7,0,0.05
+"Communications & Networking (NEC)",2,460749.890625,0.69977393171519,66.5159544767933,0.05
+"Home Improvement Products & Services Retailers (NEC)",1,327578.1875,0.675,0,0.05
+"Online Services (NEC)",1,405960.90625,0.675,0,0.05
+"Semiconductors (NEC)",7,6951743.40625,0.672414733664225,10.5008827169699,0.05
+"Investment Management & Fund Operators (NEC)",3,61145.2342281342,0.667303016904588,42.3013184279763,0.05
+"Security Software",2,229032.9765625,0.664192224843714,0,0.05
+"Fruit & Vegetable Processing",1,7.69986009597778,0.65,0,0.05
+"Specialty Mining & Metals (NEC)",1,8.86999988555908,0.65,0,0.05
+"Internet Security & Transactions Services",1,445602.90625,0.65,0,0.05
+"Plastics",1,1355997,0.65,0,0.05
+"Semiconductor Equipment & Testing (NEC)",1,266812.40625,0.65,0,0.05
+"Application Software",3,173414.52734375,0.634330548940503,0,0.05
+"Commercial Aircraft Manufacturing",2,295695.59375,0.630788924188188,0,0.05
+"Construction Machinery",1,329637.5,0.625,0,0.05
+"Electric (Alternative) Vehicles",1,1394967,0.625,0,0.05
+"Servers & Systems",1,13672.9697265625,0.625,0,0.05
+"Food Retail & Distribution (NEC)",2,990812.206840038,0.624999694290196,0,0.05
+"Banks (NEC)",1,793359.125,0.6,0,0.05
+"Transaction & Payment Services",1,41641.66015625,0.6,0,0.05
+"Broadcasting (NEC)",1,170739.09375,0.6,0,0.05
+"Financial Technology (Fintech) (NEC)",1,62391.37109375,0.6,0,0.05
+"Medical Diagnostic & Testing Equipment",1,524.695129394531,0.6,0,0.05
+"Starch, Vegetable Fat & Oil Manufacturing",1,788.799987792969,0.6,0,0.05
+"Renewable Energy Equipment & Services (NEC)",1,381.804992675781,0.575,0,0.05
+"Managed Healthcare (NEC)",1,245608,0.55,0,0.05
+"Shell Companies",1,52.2523193359375,0.55,0,0.05
+"Blockchain & Cryptocurrency (NEC)",1,46110.16015625,0.55,0,0.05
+"Medical Equipment, Supplies & Distribution (NEC)",1,178407.09375,0.55,0,0.05
+"Financial & Commodity Market Operators & Service Providers (NEC)",3,83538.9013671875,0.539784132018397,0,0.05
+"Cloud Computing Services",1,172296.40625,0.525,0,0.05
+"Rating Agencies",1,77654.1875,0.525,0,0.05
+"Semiconductor Machinery Manufacturing",1,271247.90625,0.525,0,0.05
+"Industrial Gases",2,294411.63671875,0.514015491954631,0,0.05
+"Food Processing (NEC)",1,59.5517997741699,0.5,0,0.05
+"Mining Support Services & Equipment (NEC)",1,8.32544994354248,0.475,0,0.05
+"Electronic Components",1,28049.26953125,0.425,0,0.05
+"Investment Management",3,254995.21875,0.404268246389914,0,0.05
+"Specialized REITs (NEC)",1,80436.921875,0.4,0,0.05
+"Medical Equipment",1,184.247802734375,0.375,0,0.05
+"Consumer Credit Cards Services",1,207435.796875,0.325,0,0.05
+"Securities & Commodity Exchanges",1,107154.3984375,0.325,0,0.05

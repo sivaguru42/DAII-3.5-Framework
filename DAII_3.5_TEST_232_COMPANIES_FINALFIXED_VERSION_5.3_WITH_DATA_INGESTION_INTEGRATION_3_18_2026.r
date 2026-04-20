@@ -299,13 +299,14 @@ if(nrow(european_patents) > 0) {
 }
 
 # -----------------------------------------------------------------------------
-# 0.6.2 WIPO Bulk Data – Quarterly Update (PCT/Global Patents)
+if(FALSE) { # # 0.6.2 WIPO Bulk Data – Quarterly Update (PCT/Global Patents)
 # -----------------------------------------------------------------------------
 cat("\n🌍 Pulling WIPO PCT patent data (quarterly update)...\n")
 
 source("R/02_ingest/13_wipo_bulk.r")
 
 # Determine if this is a quarterly update month (March, June, September, December)
+current_year <- as.numeric(format(Sys.Date(), "%Y"))
 current_month <- as.numeric(format(Sys.Date(), "%m"))
 is_quarterly_update <- current_month %in% c(3, 6, 9, 12)
 
@@ -362,7 +363,7 @@ if(is_quarterly_update) {
 }
 
 # -----------------------------------------------------------------------------
-# 0.7 Load Bloomberg cached data
+} # # 0.7 Load Bloomberg cached data
 # -----------------------------------------------------------------------------
 cat("\n📈 Loading Bloomberg monthly prices from cache...\n")
 bloomberg_prices <- tryCatch({
@@ -591,7 +592,7 @@ cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("📋 SECTION 3: CREATING MASTER TICKER LIST\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-master_tickers <- unique(c(rd_history$ticker, holdings_summary$Ticker))
+master_tickers <- unique(c(rd_history$ticker, holdings_lookup$Ticker))
 cat(sprintf("   Master list: %d unique companies\n", length(master_tickers)))
 
 # =============================================================================
@@ -632,10 +633,81 @@ snapshot <- snapshot %>%
                          1 / n())
   )
 
+# ============================================================
+# CALCULATE REVENUE GROWTH FROM HISTORICAL RD_HISTORY DATA
+# ============================================================
+cat("\n📈 Calculating revenue growth from historical data...\n")
+
+# Initialize revenue_growth column
+snapshot$revenue_growth <- NA_real_
+
+# Check if rd_history exists and has data
+if(exists("rd_history") && nrow(rd_history) > 0) {
+  
+  # Calculate growth using historical rd_history table
+  revenue_growth_calc <- rd_history %>%
+    filter(!is.na(revenue) & revenue > 0) %>%
+    filter(revenue > 100) %>%  # Exclude revenues under $100M (likely errors)
+    arrange(Ticker, fiscal_year_end) %>%
+    group_by(Ticker) %>%
+    mutate(
+      revenue_previous = lag(revenue),
+      revenue_growth_calc = case_when(
+        !is.na(revenue) & !is.na(revenue_previous) & revenue_previous > 0 ~ 
+          (revenue - revenue_previous) / revenue_previous,
+        TRUE ~ NA_real_
+      )
+    ) %>%
+    filter(!is.na(revenue_growth_calc)) %>%
+    filter(revenue_growth_calc < 10) %>%  # Exclude unrealistic growth >1000%
+    slice(n()) %>%
+    select(Ticker, revenue_growth_calc)
+  
+  if(nrow(revenue_growth_calc) > 0) {
+    # Update snapshot with calculated values
+    for(i in 1:nrow(revenue_growth_calc)) {
+      ticker_val <- revenue_growth_calc$Ticker[i]
+      growth_val <- revenue_growth_calc$revenue_growth_calc[i]
+      snapshot$revenue_growth[snapshot$Ticker == ticker_val] <- growth_val
+    }
+    
+    # Cap values between -100% and +100%
+    snapshot$revenue_growth <- pmax(-1, pmin(1, snapshot$revenue_growth))
+    
+    growth_count <- sum(!is.na(snapshot$revenue_growth))
+    cat(sprintf("   ✅ Revenue growth calculated for %d companies using rd_history\n", growth_count))
+  } else {
+    cat("   ⚠️ No revenue growth calculations available\n")
+  }
+  
+} else {
+  cat("   ⚠️ rd_history not found. Revenue growth will be NA.\n")
+}
+
+# Show revenue growth summary
+cat(sprintf("   📊 revenue_growth column has %d non-NA values\n", sum(!is.na(snapshot$revenue_growth))))
+cat(sprintf("   ⚠️  Missing for %d companies\n", sum(is.na(snapshot$revenue_growth))))
+
+# ============================================================
+# ENSURE REVENUE GROWTH COLUMN IS SAVED TO CSV
+# ============================================================
+
+# Double-check column exists before saving
+if(!"revenue_growth" %in% names(snapshot)) {
+  cat("   ⚠️ revenue_growth column missing! Adding placeholder.\n")
+  snapshot$revenue_growth <- NA_real_
+}
+
+# Final verification
+cat(sprintf("   ✅ revenue_growth column ready for save (%d non-NA)\n", sum(!is.na(snapshot$revenue_growth))))
+
 # Save snapshot
+raw_dir <- here("data", "raw")
 snapshot_file <- file.path(raw_dir, "N245_company_snapshot_FIXED.csv")
 write.csv(snapshot, snapshot_file, row.names = FALSE)
 cat("\n✅ Snapshot saved to:", snapshot_file, "\n")
+cat("   Columns saved:", ncol(snapshot), "\n")
+cat("   revenue_growth included:", "revenue_growth" %in% names(snapshot), "\n")
 
 cat("\n📊 FINAL COMPOSITION:\n")
 cat(sprintf("   Total companies: %d\n", nrow(snapshot)))
@@ -643,6 +715,7 @@ cat(sprintf("   In portfolio: %d\n", sum(snapshot$in_portfolio)))
 cat(sprintf("   Discovery universe: %d\n", sum(!snapshot$in_portfolio)))
 cat(sprintf("   With R&D data: %d\n", sum(!is.na(snapshot$rd_expense))))
 cat(sprintf("   With patent data: %d\n", sum(snapshot$patent_activity > 0, na.rm = TRUE)))
+cat(sprintf("   With revenue growth: %d\n", sum(!is.na(snapshot$revenue_growth))))
 
 # =============================================================================
 # SECTION 6: PROCEED TO MAIN PIPELINE
@@ -658,19 +731,102 @@ cat("   Loading snapshot for main pipeline...\n")
 daii_raw_data <- read.csv(snapshot_file, stringsAsFactors = FALSE)
 cat(sprintf("   ✅ Snapshot loaded: %d rows × %d columns\n", nrow(daii_raw_data), ncol(daii_raw_data)))
 
-# =============================================================================
+# ============================================================
+# ENSURE REVENUE GROWTH COLUMN EXISTS
+# ============================================================
+
+# Check if revenue_growth column exists in loaded data
+if(!"revenue_growth" %in% names(daii_raw_data)) {
+  cat("   ⚠️ revenue_growth column missing from loaded CSV!\n")
+  cat("   Attempting to restore from snapshot object...\n")
+  
+  # Check if snapshot object exists in environment and has revenue_growth
+  if(exists("snapshot") && "revenue_growth" %in% names(snapshot)) {
+    
+    # Handle column name differences (Ticker vs ticker)
+    if("Ticker" %in% names(snapshot)) {
+      snapshot_subset <- snapshot %>% select(Ticker, revenue_growth)
+      daii_raw_data <- daii_raw_data %>%
+        left_join(snapshot_subset, by = c("Ticker" = "Ticker"))
+      cat("   ✅ revenue_growth column added via left_join (using Ticker)\n")
+    } else if("ticker" %in% names(snapshot)) {
+      snapshot_subset <- snapshot %>% select(ticker, revenue_growth)
+      daii_raw_data <- daii_raw_data %>%
+        left_join(snapshot_subset, by = c("ticker" = "ticker"))
+      cat("   ✅ revenue_growth column added via left_join (using ticker)\n")
+    } else {
+      cat("   ⚠️ No matching key column found in snapshot\n")
+      daii_raw_data$revenue_growth <- NA_real_
+      cat("   Created placeholder revenue_growth column\n")
+    }
+    
+  } else {
+    cat("   ⚠️ No revenue_growth source available in environment\n")
+    daii_raw_data$revenue_growth <- NA_real_
+    cat("   Created placeholder revenue_growth column\n")
+  }
+  
+} else {
+  cat("   ✅ revenue_growth column already present in loaded data\n")
+}
+
+# Show revenue_growth summary
+growth_available <- sum(!is.na(daii_raw_data$revenue_growth))
+growth_missing <- sum(is.na(daii_raw_data$revenue_growth))
+cat(sprintf("   📊 revenue_growth available for %d companies\n", growth_available))
+cat(sprintf("   ⚠️  revenue_growth missing for %d companies\n", growth_missing))
+
+# Show sample values if available
+if(growth_available > 0) {
+  cat("\n   📈 Sample revenue_growth values:\n")
+  sample_data <- daii_raw_data %>%
+    filter(!is.na(revenue_growth)) %>%
+    select(Ticker, revenue_growth) %>%
+    head(10)
+  
+  # Print sample
+  for(i in 1:nrow(sample_data)) {
+    cat(sprintf("      %s: %.4f (%.1f%%)\n", 
+                sample_data$Ticker[i], 
+                sample_data$revenue_growth[i],
+                sample_data$revenue_growth[i] * 100))
+  }
+}
+
+# ============================================================
+# STANDARDIZE COLUMN NAMES FOR INNOVATION SCORING
+# ============================================================
 
 # Standardize column names for innovation scoring
 if("Ticker" %in% names(daii_raw_data) && !"ticker" %in% names(daii_raw_data)) {
   daii_raw_data <- daii_raw_data %>% rename(ticker = Ticker)
-  cat("   Renamed Ticker to ticker for innovation scoring\n")
+  cat("\n   Renamed Ticker to ticker for innovation scoring\n")
 }
+
+# Final verification before proceeding
+cat("\n✅ DATA READY FOR INNOVATION SCORING\n")
+cat(sprintf("   Final dataset: %d rows × %d columns\n", nrow(daii_raw_data), ncol(daii_raw_data)))
+cat(sprintf("   revenue_growth column present: %s\n", "revenue_growth" %in% names(daii_raw_data)))
 
 # SECTION 7: MODULES 1-3 - INNOVATION SCORING
 # =============================================================================
 cat(paste(rep("=", 80), collapse = ""), "\n")
 cat("📈 MODULES 1-3: INNOVATION SCORING\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
+
+# Ensure industry column exists for innovation scoring
+if(!"industry" %in% names(daii_raw_data)) {
+  cat("   ℹ️ Creating temporary industry column for innovation scoring...\n")
+  # Try to map from TRBC_Industry if available
+  if("TRBC_Industry" %in% names(daii_raw_data)) {
+    daii_raw_data$industry <- daii_raw_data$TRBC_Industry
+    cat("   ✅ Created industry column from TRBC_Industry\n")
+  } else {
+    # Default industry assignment
+    daii_raw_data$industry <- "Unknown"
+    cat("   ⚠️ No TRBC_Industry found. Using default 'Unknown' for all companies\n")
+  }
+}
 
 # Source the innovation scoring module
 source(here("R", "04_modules", "01_innovation_scoring.r"))
@@ -1539,86 +1695,116 @@ if(!exists("portfolio_holdings")) {
 # =============================================================================
 # SECTION 10.9: UNIVERSAL CONTROL PANEL
 # =============================================================================
-
-# =============================================================================
-# SECTION 10.9: UNIVERSAL CONTROL PANEL
-# =============================================================================
 cat("\n", paste(rep("=", 80), collapse = ""), "\n")
 cat("🎯 SECTION 10.9: UNIVERSAL CONTROL PANEL\n")
 cat(paste(rep("=", 80), collapse = ""), "\n\n")
 
-source("R/04_modules/09_universal_control_panel.r")
+# Set force_refresh to FALSE for normal operation
+force_refresh <- FALSE
 
-# Check if universal panel already exists
-panel_file <- "data/00_reference/universal_control_panel.rds"
+# ============================================================================
+# UNIVERSAL CONTROL PANEL - COMMENTED OUT (OPTIONAL FEATURE)
+# ============================================================================
+# This section requires additional setup and is optional for core pipeline.
+# The main control benchmarks (AI-Low, Matched-Pair, Power Analysis) are
+# already provided in Section 10.8.
+#
+# To enable this section, uncomment the code below and ensure:
+# - pwr package is installed
+# - market_cap column exists in portfolio_holdings
+# - Sufficient eligible controls are available in daii_scored
+# ============================================================================
 
-if(file.exists(panel_file) && !force_refresh) {
-  cat("   Loading existing universal control panel...\n")
-  universal_panel <- readRDS(panel_file)
-  panel_metadata <- readRDS("data/00_reference/universal_control_panel_metadata.rds")
-  select_matches <- readRDS("data/00_reference/control_selection_function.rds")
+if(FALSE) {  # Commented out - set to TRUE to enable
   
-  cat(sprintf("   Panel size: %d controls\n", nrow(universal_panel)))
-  cat(sprintf("   Design date: %s\n", panel_metadata$design_date))
-  cat(sprintf("   Achievable power: %.1f%%\n", panel_metadata$achievable_power * 100))
+  source("R/04_modules/09_universal_control_panel.r")
+  
+  # Check if universal panel already exists
+  panel_file <- "data/00_reference/universal_control_panel.rds"
+  
+  if(file.exists(panel_file) && !force_refresh) {
+    cat("   Loading existing universal control panel...\n")
+    universal_panel <- readRDS(panel_file)
+    panel_metadata <- readRDS("data/00_reference/universal_control_panel_metadata.rds")
+    select_matches <- readRDS("data/00_reference/control_selection_function.rds")
+    
+    cat(sprintf("   Panel size: %d controls\n", nrow(universal_panel)))
+    cat(sprintf("   Design date: %s\n", panel_metadata$design_date))
+    cat(sprintf("   Achievable power: %.1f%%\n", panel_metadata$achievable_power * 100))
+    
+  } else {
+    cat("   Designing new universal control panel...\n")
+    universal_panel_result <- design_universal_control_panel(
+      daii_scored = daii_scored,
+      target_power = 0.8,
+      min_controls_per_stratum = 10,
+      effect_size_estimate = 0.005
+    )
+    
+    universal_panel <- universal_panel_result$panel
+    panel_metadata <- universal_panel_result$metadata
+    select_matches <- universal_panel_result$select_matches
+    
+    cat("\n   ✅ Universal control panel created\n")
+  }
+  
+  # Calculate power for current portfolio
+  portfolio_power <- calculate_power(
+    portfolio_size = nrow(portfolio_holdings),
+    effect_size = 0.005
+  )
+  
+  cat("\n📊 POWER ANALYSIS FOR CURRENT PORTFOLIO:\n")
+  cat(sprintf("   Portfolio size: %d companies\n", portfolio_power$portfolio_size))
+  cat(sprintf("   Control panel size: %d companies\n", portfolio_power$control_panel_size))
+  cat(sprintf("   Effective sample size: %.1f\n", portfolio_power$effective_n))
+  cat(sprintf("   Statistical power: %.1f%%\n", portfolio_power$power * 100))
+  cat(sprintf("   Interpretation: %s\n", portfolio_power$interpretation))
+  
+  # Match portfolio to universal panel
+  cat("\n🔗 Matching portfolio to universal control panel...\n")
+  universal_matches <- select_matches(
+    test_companies = portfolio_holdings,
+    method = "optimal"
+  )
+  
+  cat(sprintf("   Created %d matched pairs\n", nrow(universal_matches)))
+  cat(sprintf("   Average AI gap: %.3f\n", mean(universal_matches$ai_score_gap, na.rm = TRUE)))
+  cat(sprintf("   Average match quality: %.3f\n", mean(universal_matches$match_quality, na.rm = TRUE)))
+  
+  # Run power simulation (optional, can be commented out for production)
+  if(FALSE) {  # Set to TRUE to run simulation (takes time)
+    cat("\n🔬 Running power simulation...\n")
+    simulation_results <- simulate_power(
+      universal_panel = list(panel = universal_panel),
+      n_simulations = 100,
+      effect_sizes = c(0.002, 0.005, 0.01)
+    )
+    print(simulation_results)
+  }
+  
+  # Store results
+  assign("universal_panel", universal_panel, envir = .GlobalEnv)
+  assign("universal_matches", universal_matches, envir = .GlobalEnv)
+  assign("portfolio_power", portfolio_power, envir = .GlobalEnv)
+  
+  cat("\n   ✅ Universal control panel analysis complete\n")
   
 } else {
-  cat("   Designing new universal control panel...\n")
-  universal_panel_result <- design_universal_control_panel(
-    daii_scored = daii_scored,
-    target_power = 0.8,
-    min_controls_per_stratum = 10,
-    effect_size_estimate = 0.005
-  )
-  
-  universal_panel <- universal_panel_result$panel
-  panel_metadata <- universal_panel_result$metadata
-  select_matches <- universal_panel_result$select_matches
-  
-  cat("\n   ✅ Universal control panel created\n")
+  cat("   ⚠️ Universal control panel is disabled (optional feature).\n")
+  cat("   ✅ Core control benchmarks (AI-Low, Matched-Pair, Power Analysis) available in Section 10.8.\n")
+  cat("   ℹ️ To enable universal control panel, set if(FALSE) to if(TRUE) in Section 10.9\n")
 }
 
-# Calculate power for current portfolio
-portfolio_power <- calculate_power(
-  portfolio_size = nrow(portfolio_holdings),
-  effect_size = 0.005
-)
+# =============================================================================
+# END OF SECTION 10.9
+# =============================================================================
 
-cat("\n📊 POWER ANALYSIS FOR CURRENT PORTFOLIO:\n")
-cat(sprintf("   Portfolio size: %d companies\n", portfolio_power$portfolio_size))
-cat(sprintf("   Control panel size: %d companies\n", portfolio_power$control_panel_size))
-cat(sprintf("   Effective sample size: %.1f\n", portfolio_power$effective_n))
-cat(sprintf("   Statistical power: %.1f%%\n", portfolio_power$power * 100))
-cat(sprintf("   Interpretation: %s\n", portfolio_power$interpretation))
+# Define output directory
+output_dir <- "outputs"
+if(!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-# Match portfolio to universal panel
-cat("\n🔗 Matching portfolio to universal control panel...\n")
-universal_matches <- select_matches(
-  test_companies = portfolio_holdings,
-  method = "optimal"
-)
-
-cat(sprintf("   Created %d matched pairs\n", nrow(universal_matches)))
-cat(sprintf("   Average AI gap: %.3f\n", mean(universal_matches$ai_score_gap, na.rm = TRUE)))
-cat(sprintf("   Average match quality: %.3f\n", mean(universal_matches$match_quality, na.rm = TRUE)))
-
-# Run power simulation (optional, can be commented out for production)
-if(FALSE) {  # Set to TRUE to run simulation (takes time)
-  cat("\n🔬 Running power simulation...\n")
-  simulation_results <- simulate_power(
-    universal_panel = list(panel = universal_panel),
-    n_simulations = 100,
-    effect_sizes = c(0.002, 0.005, 0.01)
-  )
-  print(simulation_results)
-}
-
-# Store results
-assign("universal_panel", universal_panel, envir = .GlobalEnv)
-assign("universal_matches", universal_matches, envir = .GlobalEnv)
-assign("portfolio_power", portfolio_power, envir = .GlobalEnv)
-
-cat("\n   ✅ Universal control panel analysis complete\n")
+cat("📁 Output directory:", output_dir, "\n")
 
 # =============================================================================
 # SECTION 11: OUTPUT GENERATION
